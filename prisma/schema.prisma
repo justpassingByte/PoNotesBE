@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id    String @id @default(uuid())
+  email String @unique
+}
+
+model Platform {
+  id      String   @id @default(uuid())
+  name    String   @unique // e.g. "WPT Poker", "GG Poker"
+  players Player[]
+}
+
+model Player {
+  id               String   @id @default(uuid())
+  platform_id      String
+  name             String
+  playstyle        String?
+  aggression_score Int      @default(0)
+  created_at       DateTime @default(now())
+  
+  platform         Platform @relation(fields: [platform_id], references: [id])
+  notes            Note[]
+
+  @@unique([platform_id, name]) // A player name is unique per platform
+}
+
+model Note {
+  id         String   @id @default(uuid())
+  player_id  String
+  street     String
+  note_type  String
+  content    String
+  created_at DateTime @default(now())
+
+  player     Player   @relation(fields: [player_id], references: [id])
+}
+
+model Template {
+  id       String @id @default(uuid())
+  label    String
+  category String
+  weight   Int    @default(0)
+}
