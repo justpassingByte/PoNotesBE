@@ -1,17 +1,13 @@
 import { app } from './app';
 import { config } from './config/unifiedConfig';
 
-const startServer = () => {
-    try {
-        const port = config.server.port;
+// Only start listening when running locally (not in Vercel serverless)
+if (process.env.VERCEL !== '1') {
+    const port = config.server.port;
+    app.listen(port, () => {
+        console.log(`🚀 Server is running on port ${port}`);
+    });
+}
 
-        app.listen(port, () => {
-            console.log(`🚀 Server is running on port ${port}`);
-        });
-    } catch (error) {
-        console.error('Failed to start server:', error);
-        process.exit(1);
-    }
-};
-
-startServer();
+// Export for Vercel serverless
+export default app;
