@@ -14,6 +14,21 @@ import { templateRoutes } from './routes/templateRoutes';
 import { platformRoutes } from './routes/platformRoutes';
 
 // Routes
+app.get('/', (req, res) => {
+    res.json({
+        name: 'VillainVault API',
+        version: '1.0.0',
+        status: 'running',
+        endpoints: {
+            health: '/health',
+            players: '/api/players',
+            notes: '/api/notes',
+            templates: '/api/templates',
+            platforms: '/api/platforms'
+        }
+    });
+});
+
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date() });
 });
