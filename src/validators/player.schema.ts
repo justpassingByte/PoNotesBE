@@ -6,8 +6,8 @@ export const bulkImportSchema = z.array(z.object({
     playstyle: z.string().optional().default('UNKNOWN'),
     notes: z.array(z.object({
         street: z.string().refine(
-            (val) => ['Preflop', 'Flop', 'Turn', 'River'].includes(val),
-            { message: "Street must be Preflop, Flop, Turn, or River" }
+            (val) => ['Preflop', 'Postflop', 'Flop', 'Turn', 'River'].includes(val),
+            { message: "Street must be Preflop, Postflop, Flop, Turn, or River" }
         ).optional().default('Preflop'),
         note_type: z.string().optional().default('Custom'),
         content: z.string().min(1, 'Note content cannot be empty')

@@ -103,7 +103,7 @@ export class PlayerController extends BaseController {
             }, 201);
         } catch (error) {
             if (error instanceof z.ZodError) {
-                return res.status(400).json({ success: false, error: 'Bulk Validation Error' });
+                return res.status(400).json({ success: false, error: 'Bulk Validation Error', details: error.issues.map(e => `${e.path.join('.')}: ${e.message}`) });
             }
             this.handleError(error, res, 'PlayerController.bulkCreate');
         }

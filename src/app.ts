@@ -4,8 +4,18 @@ import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// CORS — allow frontend origins
+const allowedOrigins = [
+    'http://localhost:3000',
+    'https://po-notes-fe.vercel.app',
+    process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+    origin: allowedOrigins as string[],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true
+}));
 app.use(express.json());
 
 import { playerRoutes } from './routes/playerRoutes';
