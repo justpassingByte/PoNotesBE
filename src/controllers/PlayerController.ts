@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { BaseController } from './BaseController';
 import { PlayerService } from '../services/playerService';
 import { z } from 'zod';
+import { paginationSchema } from '../validators/player.schema';
 
 export class PlayerController extends BaseController {
     constructor(private readonly playerService: PlayerService) {
@@ -10,13 +11,13 @@ export class PlayerController extends BaseController {
 
     async getAll(req: Request, res: Response) {
         try {
-            const players = await this.playerService.getAllPlayers();
-            // Flatten _count.notes into notesCount for the frontend
-            const flattened = (players as any[]).map((p: any) => ({
-                ...p,
-                notesCount: p._count?.notes || 0,
-            }));
-            this.handleSuccess(res, flattened);
+            const { limit, cursor } = paginationSchema.parse(req.query);
+            const result = await this.playerService.getPlayersPaginated(limit, cursor);
+            res.json({
+                success: true,
+                data: result.data,
+                meta: result.meta,
+            });
         } catch (error) {
             this.handleError(error, res, 'PlayerController.getAll');
         }

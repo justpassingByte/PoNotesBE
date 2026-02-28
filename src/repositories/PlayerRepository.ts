@@ -13,6 +13,51 @@ export class PlayerRepository {
         });
     }
 
+    async findPaginated(limit: number, cursor?: string) {
+        const args: {
+            take: number;
+            skip?: number;
+            cursor?: { id: string };
+            orderBy: { created_at: 'desc' };
+            include: {
+                platform: true;
+                _count: { select: { notes: true } };
+            };
+        } = {
+            take: limit,
+            orderBy: { created_at: 'desc' },
+            include: {
+                platform: true,
+                _count: { select: { notes: true } }
+            }
+        };
+
+        if (cursor) {
+            args.skip = 1; // Skip the cursor item itself
+            args.cursor = { id: cursor };
+        }
+
+        return prisma.player.findMany(args);
+    }
+
+    async getAggregateStats() {
+        const [totalCount, totalNotesCount, playstyleGroups] = await Promise.all([
+            prisma.player.count(),
+            prisma.note.count(),
+            prisma.player.groupBy({
+                by: ['playstyle'],
+                _count: { _all: true }
+            })
+        ]);
+
+        const playstyleCounts: Record<string, number> = {};
+        playstyleGroups.forEach(g => {
+            playstyleCounts[g.playstyle || 'UNKNOWN'] = g._count._all;
+        });
+
+        return { totalCount, totalNotesCount, playstyleCounts };
+    }
+
     async findAllWithNotes() {
         return prisma.player.findMany({
             include: {

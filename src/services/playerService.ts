@@ -21,6 +21,34 @@ export class PlayerService {
         return this.playerRepository.findAll();
     }
 
+    async getPlayersPaginated(limit: number, cursor?: string) {
+        const [players, stats] = await Promise.all([
+            this.playerRepository.findPaginated(limit, cursor),
+            this.playerRepository.getAggregateStats()
+        ]);
+
+        // Flatten _count.notes into notesCount
+        const flattened = (players as any[]).map((p: any) => ({
+            ...p,
+            notesCount: p._count?.notes || 0,
+        }));
+
+        const lastPlayer = flattened[flattened.length - 1];
+        const hasMore = flattened.length === limit;
+        const nextCursor = lastPlayer?.id || null;
+
+        return {
+            data: flattened,
+            meta: {
+                totalCount: stats.totalCount,
+                totalNotesCount: stats.totalNotesCount,
+                playstyleCounts: stats.playstyleCounts,
+                hasMore,
+                nextCursor,
+            }
+        };
+    }
+
     async exportAllPlayers() {
         return this.playerRepository.findAllWithNotes();
     }

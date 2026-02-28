@@ -19,3 +19,8 @@ export const createPlayerSchema = z.object({
     platform_id: z.string().uuid('Invalid platform ID'),
     playstyle: z.string().optional().default('UNKNOWN'),
 });
+
+export const paginationSchema = z.object({
+    limit: z.coerce.number().int().min(1).max(50).default(10),
+    cursor: z.string().uuid('Invalid cursor ID').optional(),
+});
