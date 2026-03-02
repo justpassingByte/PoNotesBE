@@ -1,0 +1,87 @@
+{
+    "description": "GTO preflop opening and defending ranges by position for 6-max cash games at various stack depths",
+    "positions": {
+        "UTG": {
+            "open_range": {
+                "100bb": "22+, A2s+, A9o+, KTs+, KJo+, QTs+, JTs, T9s",
+                "50bb": "33+, A5s+, ATo+, KTs+, KQo, QTs+, JTs",
+                "25bb": "55+, A9s+, AJo+, KQs, KQo"
+            },
+            "open_pct": {
+                "100bb": 15,
+                "50bb": 12,
+                "25bb": 9
+            },
+            "3bet_range": "QQ+, AKs, AKo, A5s-A4s"
+        },
+        "HJ": {
+            "open_range": {
+                "100bb": "22+, A2s+, A8o+, KTs+, KJo+, QTs+, Q9s, JTs, J9s, T9s, 98s",
+                "50bb": "22+, A3s+, A9o+, KTs+, KJo+, QTs+, JTs, T9s",
+                "25bb": "44+, A7s+, ATo+, KTs+, KQo, QTs+"
+            },
+            "open_pct": {
+                "100bb": 18,
+                "50bb": 15,
+                "25bb": 11
+            },
+            "3bet_range": "QQ+, AKs, AKo, AQs, A5s-A4s"
+        },
+        "CO": {
+            "open_range": {
+                "100bb": "22+, A2s+, A5o+, K8s+, KTo+, Q9s+, QTo+, J9s+, JTo, T8s+, 97s+, 86s+, 76s, 65s",
+                "50bb": "22+, A2s+, A8o+, K9s+, KTo+, Q9s+, QTo+, J9s+, T9s, 98s",
+                "25bb": "33+, A5s+, ATo+, K9s+, KJo+, QTs+, JTs"
+            },
+            "open_pct": {
+                "100bb": 27,
+                "50bb": 22,
+                "25bb": 15
+            },
+            "3bet_range": "JJ+, AKs, AKo, AQs, AJs, A5s-A3s, KQs"
+        },
+        "BTN": {
+            "open_range": {
+                "100bb": "22+, A2s+, A2o+, K2s+, K7o+, Q5s+, Q9o+, J7s+, J9o+, T7s+, T9o, 96s+, 85s+, 75s+, 64s+, 54s, 53s",
+                "50bb": "22+, A2s+, A3o+, K5s+, K9o+, Q7s+, QTo+, J8s+, JTo, T8s+, 97s+, 86s+, 76s, 65s",
+                "25bb": "22+, A2s+, A7o+, K8s+, KTo+, Q9s+, QTo+, J9s+, T9s, 98s"
+            },
+            "open_pct": {
+                "100bb": 40,
+                "50bb": 32,
+                "25bb": 22
+            },
+            "3bet_range": "TT+, AKs-AJs, AKo, AQo, A5s-A2s, KQs, KJs"
+        },
+        "SB": {
+            "open_range": {
+                "100bb": "22+, A2s+, A2o+, K2s+, K5o+, Q4s+, Q9o+, J6s+, J9o+, T6s+, T9o, 96s+, 85s+, 74s+, 64s+, 53s+",
+                "50bb": "22+, A2s+, A3o+, K4s+, K8o+, Q7s+, QTo+, J8s+, JTo, T8s+, 97s+, 86s+, 76s",
+                "25bb": "22+, A2s+, A5o+, K7s+, KTo+, Q9s+, QTo+, J9s+, T8s+, 98s"
+            },
+            "open_pct": {
+                "100bb": 43,
+                "50bb": 35,
+                "25bb": 25
+            },
+            "3bet_vs_btn": "JJ+, AKs-ATs, AKo-AJo, A5s-A2s, KQs-KTs, KQo, QJs, JTs"
+        },
+        "BB": {
+            "defend_vs_btn": {
+                "100bb": "22+, A2s+, A3o+, K2s+, K6o+, Q3s+, Q8o+, J5s+, J8o+, T6s+, T8o+, 96s+, 85s+, 75s+, 64s+, 54s",
+                "50bb": "33+, A2s+, A5o+, K5s+, K9o+, Q7s+, QTo+, J8s+, JTo, T8s+, 97s+, 86s+, 76s",
+                "25bb": "44+, A4s+, A8o+, K8s+, KTo+, Q9s+, QTo+, J9s+, T9s, 98s"
+            },
+            "defend_pct": {
+                "100bb": 55,
+                "50bb": 42,
+                "25bb": 30
+            },
+            "3bet_range": "TT+, AKs-AQs, AKo, A5s-A4s, KQs"
+        }
+    },
+    "4bet_ranges": {
+        "IP_vs_3bet": "QQ+, AKs, AKo, A5s (bluffs: A4s, K5s occasionally)",
+        "OOP_vs_3bet": "KK+, AKs (tighter due to positional disadvantage)"
+    }
+}

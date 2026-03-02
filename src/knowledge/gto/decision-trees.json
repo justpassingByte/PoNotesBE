@@ -1,0 +1,103 @@
+{
+    "description": "Common poker decision trees for GTO play in key spots",
+    "preflop_trees": {
+        "facing_open": {
+            "ip": {
+                "options": [
+                    "fold",
+                    "call",
+                    "3bet"
+                ],
+                "default_strategy": "3bet or fold with polarized range; flat call with suited connectors and medium pairs",
+                "3bet_frequency": "12-15% of hands vs CO/BTN open"
+            },
+            "oop": {
+                "options": [
+                    "fold",
+                    "call",
+                    "3bet"
+                ],
+                "default_strategy": "3bet or fold preferred; flatting OOP is costly, limit to strong implied odds hands",
+                "3bet_frequency": "8-12% of hands"
+            }
+        },
+        "facing_3bet": {
+            "ip": {
+                "options": [
+                    "fold",
+                    "call",
+                    "4bet"
+                ],
+                "call_range": "TT-JJ, AQs, AQo, KQs, suited connectors (position-dependent)",
+                "4bet_range": "QQ+, AKs, AKo, bluffs A5s-A4s"
+            },
+            "oop": {
+                "options": [
+                    "fold",
+                    "call",
+                    "4bet"
+                ],
+                "call_range": "JJ-QQ, AKo (sometimes), KQs",
+                "4bet_range": "KK+, AKs"
+            }
+        },
+        "squeeze_spot": {
+            "criteria": "Open + caller(s) in front",
+            "ip_squeeze_range": "TT+, AKs, AQs+, bluffs suited Ax",
+            "oop_squeeze_range": "QQ+, AKs",
+            "sizing": "4x open + 1x per caller"
+        }
+    },
+    "postflop_trees": {
+        "as_preflop_raiser_ip": {
+            "flop_decision": {
+                "strong_hand": "Bet for value (50-66% pot)",
+                "medium_hand": "Bet small (33%) or check for pot control",
+                "draw": "Bet as semi-bluff (50-66%) or check to realize equity",
+                "air": "Bet small (33%) at high frequency on dry boards; give up on wet boards"
+            },
+            "facing_checkraise": {
+                "strong_hand": "Call or 3bet (depending on SPR)",
+                "medium_hand": "Call if pot odds favorable; fold marginal",
+                "draw": "Call with proper odds; fold weak draws",
+                "air": "Fold"
+            }
+        },
+        "as_preflop_raiser_oop": {
+            "flop_decision": {
+                "strong_hand": "Bet (50-66%) or check-raise if expect bet behind",
+                "medium_hand": "Check-call or small c-bet (33%)",
+                "draw": "Check-call or check-raise (semi-bluff with equity)",
+                "air": "Check-fold most; c-bet selectively on dry boards"
+            }
+        },
+        "as_preflop_caller_ip": {
+            "facing_cbet": {
+                "strong_hand": "Raise or call (depending on board texture and opponent tendencies)",
+                "medium_hand": "Call",
+                "draw": "Call with proper odds; raise semi-bluff occasionally",
+                "air": "Float dry boards; fold wet boards"
+            },
+            "when_checked_to": {
+                "strong_hand": "Bet 50-75% pot for value",
+                "medium_hand": "Bet 33% for thin value/protection",
+                "draw": "Bet as semi-bluff 50%",
+                "air": "Bet 33% to pick up dead money; give up multiway"
+            }
+        }
+    },
+    "stack_depth_adjustments": {
+        "deep_100bb_plus": {
+            "notes": "More implied odds; speculative hands increase in value; 3bet bluffs more viable",
+            "key_change": "Flat call more preflop; play more streets postflop"
+        },
+        "medium_50bb": {
+            "notes": "SPR decreases; top pair becomes more committing; 4bet = shove with many hands",
+            "key_change": "Tighten preflop; commit with top pair + kicker more readily"
+        },
+        "short_25bb": {
+            "notes": "Push/fold dynamics dominate; 3bet = shove; postflop play simplified",
+            "key_change": "Open-shove ranges replace standard opens; ICM considerations in tournaments"
+        }
+    }
+}
