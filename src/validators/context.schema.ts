@@ -27,7 +27,7 @@ export const spotTemplateBucketSchema = z.enum([
 
 export const highCardTierSchema = z.enum(["ACE_HIGH", "KING_HIGH", "QUEEN_HIGH", "JACK_HIGH", "LOW_BOARD", "UNKNOWN"]);
 export const suitednessSchema = z.enum(["MONOTONE", "TWO_TONE", "RAINBOW", "UNKNOWN"]);
-export const connectivitySchema = z.enum(["CONNECTED", "SEMI_CONNECTED", "DISCONNECTED", "UNKNOWN"]);
+export const connectivitySchema = z.enum(["DRY", "CONNECTED", "VERY_CONNECTED", "SEMI_CONNECTED", "DISCONNECTED", "UNKNOWN"]);
 export const pairedStatusSchema = z.enum(["UNPAIRED", "PAIRED", "TWO_PAIR", "TRIPS", "QUADS", "UNKNOWN"]);
 
 export const boardTextureBucketSchema = z.object({

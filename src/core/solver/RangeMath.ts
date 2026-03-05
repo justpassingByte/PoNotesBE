@@ -17,6 +17,12 @@ export interface SplitResult {
     readonly fold: RangeState;
 }
 
+export interface RawSplitResult {
+    readonly raise: Map<string, number>;
+    readonly call: Map<string, number>;
+    readonly fold: Map<string, number>;
+}
+
 export class RangeMath {
     /**
      * Normalize raw weights to sum exactly to 100.0000.
@@ -99,6 +105,23 @@ export class RangeMath {
      * Each branch is independently normalized to 100.0000.
      */
     static split(range: RangeState, freqs: ActionFrequencies): SplitResult {
+        const raw = this.splitRaw(range, freqs);
+
+        return {
+            raise: RangeMath.normalize(raw.raise),
+            call: RangeMath.normalize(raw.call),
+            fold: RangeMath.normalize(raw.fold),
+        };
+    }
+
+    /**
+     * Split a RangeState proportionally by action frequencies — WITHOUT normalization.
+     *
+     * Returns raw Maps with weights that preserve the original proportional differences.
+     * Used by SolverEngine when strategic context is provided, so that StrategicShaper
+     * can differentiate tier assignments across branches.
+     */
+    static splitRaw(range: RangeState, freqs: ActionFrequencies): RawSplitResult {
         const hands = HandClassGenerator.generateAll();
 
         const raiseMap = new Map<string, number>();
@@ -121,9 +144,49 @@ export class RangeMath {
         }
 
         return {
-            raise: RangeMath.normalize(raiseMap),
-            call: RangeMath.normalize(callMap),
-            fold: RangeMath.normalize(foldMap),
+            raise: raiseMap,
+            call: callMap,
+            fold: foldMap,
+        };
+    }
+
+    /**
+     * Split a RangeState using per-hand action frequencies — WITHOUT normalization.
+     *
+     * Each hand gets its own raise/call/fold split ratio based on hand strength.
+     * Returns raw Maps preserving the original proportional differences.
+     */
+    static splitRawPerHand(
+        range: RangeState,
+        perHandFreqs: ReadonlyMap<string, ActionFrequencies>
+    ): RawSplitResult {
+        const hands = HandClassGenerator.generateAll();
+
+        const raiseMap = new Map<string, number>();
+        const callMap = new Map<string, number>();
+        const foldMap = new Map<string, number>();
+
+        for (const hand of hands) {
+            const weightInt = Math.round(range.get(hand) * PRECISION);
+            const freqs = perHandFreqs.get(hand);
+
+            if (!freqs) {
+                throw new Error(`splitRawPerHand: missing frequencies for hand ${hand}`);
+            }
+
+            const raiseInt = Math.round(weightInt * freqs.raise_pct / 100);
+            const callInt = Math.round(weightInt * freqs.call_pct / 100);
+            const foldInt = Math.max(0, weightInt - raiseInt - callInt);
+
+            raiseMap.set(hand, raiseInt / PRECISION);
+            callMap.set(hand, callInt / PRECISION);
+            foldMap.set(hand, foldInt / PRECISION);
+        }
+
+        return {
+            raise: raiseMap,
+            call: callMap,
+            fold: foldMap,
         };
     }
 }

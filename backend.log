@@ -1,0 +1,12 @@
+🚀 Server is running on port 3001
+Solver error: TypeError: spot.endsWith is not a function
+    at extractPosition (C:\Users\Admin\Desktop\projects\PoNotes\backend\dist\src\core\solver\strategic\types.js:21:17)
+    at SolverEngine.solve (C:\Users\Admin\Desktop\projects\PoNotes\backend\dist\src\core\solver\SolverEngine.js:82:51)
+    at solve (C:\Users\Admin\Desktop\projects\PoNotes\backend\dist\src\controllers\SolverController.js:22:56)
+    at Layer.handleRequest (C:\Users\Admin\Desktop\projects\PoNotes\backend\node_modules\router\lib\layer.js:152:17)
+    at next (C:\Users\Admin\Desktop\projects\PoNotes\backend\node_modules\router\lib\route.js:157:13)
+    at Route.dispatch (C:\Users\Admin\Desktop\projects\PoNotes\backend\node_modules\router\lib\route.js:117:3)
+    at handle (C:\Users\Admin\Desktop\projects\PoNotes\backend\node_modules\router\index.js:435:11)
+    at Layer.handleRequest (C:\Users\Admin\Desktop\projects\PoNotes\backend\node_modules\router\lib\layer.js:152:17)
+    at C:\Users\Admin\Desktop\projects\PoNotes\backend\node_modules\router\index.js:295:15
+    at processParams (C:\Users\Admin\Desktop\projects\PoNotes\backend\node_modules\router\index.js:582:12)

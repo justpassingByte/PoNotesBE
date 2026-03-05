@@ -27,6 +27,7 @@ import { playerStatsRoutes } from './routes/playerStatsRoutes';
 import analyzeRoutes from './routes/analyzeRoutes';
 import { playerProfileRoutes } from './routes/playerProfileRoutes';
 import exploitRoutes from './routes/exploitRoutes';
+import { solverRoutes } from './routes/solverRoutes';
 
 // Routes
 app.get('/', (req, res) => {
@@ -42,7 +43,8 @@ app.get('/', (req, res) => {
             platforms: '/api/platforms',
             settings: '/api/settings',
             analyze: '/api/players/:playerId/analyze',
-            exploit: '/api/players/:playerId/exploit'
+            exploit: '/api/players/:playerId/exploit',
+            solve: '/api/solve'
         }
     });
 });
@@ -60,6 +62,7 @@ app.use('/api/notes', noteRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/platforms', platformRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/solve', solverRoutes);
 
 // Global Error Handler
 app.use(errorHandler);

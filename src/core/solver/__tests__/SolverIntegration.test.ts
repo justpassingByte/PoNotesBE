@@ -57,9 +57,24 @@ describe('Integration: Full Node Split Lifecycle', () => {
                 expect(v).toBeGreaterThanOrEqual(0);
             }
 
-            // Sum exactly to 100
-            expect(Math.abs(sumRange(child.range) - 100)).toBeLessThan(1e-8);
+            // Sum is either 100 (active branch) or 0 (disabled branch)
+            const sum = sumRange(child.range);
+            const isHundred = Math.abs(sum - 100) < 1e-8;
+            const isZero = Math.abs(sum) < 1e-8;
+            expect(isHundred || isZero).toBe(true);
         }
+    });
+
+    it('preflop SRP root disables call, but non-root preflop nodes can still call', () => {
+        const root = SolverEngine.initRoot(DEFAULT_CONFIG);
+        const rootChildren = SolverEngine.expandNode(root);
+
+        const rootCallSum = sumRange(rootChildren.call.range);
+        expect(Math.abs(rootCallSum)).toBeLessThan(1e-8);
+
+        const raiseChildren = SolverEngine.expandNode(rootChildren.raise);
+        const nonRootCallSum = sumRange(raiseChildren.call.range);
+        expect(nonRootCallSum).toBeGreaterThan(0);
     });
 
     it('child nodes have correct structural metadata', () => {

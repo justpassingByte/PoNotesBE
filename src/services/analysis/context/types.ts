@@ -12,10 +12,10 @@ export type Street = 'preflop' | 'flop' | 'turn' | 'river';
  * Assumes inputs are strictly normalized to Big Blinds (BBs).
  */
 export type StackDepthBucket =
-    | "SHORT"      // 0 - 29 BB
-    | "MEDIUM"     // 30 - 59 BB
-    | "DEEP"       // 60 - 99 BB
-    | "VERY_DEEP"  // 100+ BB
+    | "SHORT"      // < 40 BB
+    | "MEDIUM"     // 40 - 80 BB
+    | "DEEP"       // 80 - 150 BB
+    | "VERY_DEEP"  // > 150 BB
     | "UNKNOWN";   // Fallback for invalid/missing data
 
 /**
@@ -45,7 +45,15 @@ export type HighCardTier =
     | "UNKNOWN";
 
 export type Suitedness = "MONOTONE" | "TWO_TONE" | "RAINBOW" | "UNKNOWN";
-export type Connectivity = "CONNECTED" | "SEMI_CONNECTED" | "DISCONNECTED" | "UNKNOWN";
+// Preferred UI buckets: DRY, CONNECTED, VERY_CONNECTED.
+// Legacy buckets are kept for compatibility and mapped in controller.
+export type Connectivity =
+    | "DRY"
+    | "CONNECTED"
+    | "VERY_CONNECTED"
+    | "SEMI_CONNECTED"
+    | "DISCONNECTED"
+    | "UNKNOWN";
 export type PairedStatus = "UNPAIRED" | "PAIRED" | "TWO_PAIR" | "TRIPS" | "QUADS" | "UNKNOWN";
 
 export interface BoardTextureBucket {

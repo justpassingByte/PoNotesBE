@@ -91,4 +91,33 @@ export class GameNode {
 
         return this._children;
     }
+
+    /**
+     * Expand this node from pre-computed, normalized RangeStates.
+     * Used by SolverEngine when strategic layer adjusts branch ranges
+     * after split but before child creation.
+     * Can only be called once (immutable after expansion).
+     */
+    expandFromRanges(raise: RangeState, call: RangeState, fold: RangeState): GameNodeChildren {
+        if (this._children) {
+            throw new Error('GameNode has already been expanded');
+        }
+
+        const childBase = {
+            street: this.street,
+            spotTemplate: this.spotTemplate,
+            stackDepth: this.stackDepth,
+            potState: this.potState,
+            boardContext: this.boardContext,
+            parent: this,
+        };
+
+        this._children = {
+            raise: new GameNode({ ...childBase, range: raise, actionTaken: 'raise' }),
+            call: new GameNode({ ...childBase, range: call, actionTaken: 'call' }),
+            fold: new GameNode({ ...childBase, range: fold, actionTaken: 'fold' }),
+        };
+
+        return this._children;
+    }
 }
