@@ -6,7 +6,7 @@ import {
     Archetype,
     TendencyTag
 } from './types';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 export class PlayerProfileAggregator {
 
@@ -29,7 +29,7 @@ export class PlayerProfileAggregator {
         const tendencies = this.normalizeAndWeightTendencies(templateNotes, aiSignals);
 
         return {
-            player_profile_id: uuidv4(),
+            player_profile_id: randomUUID(),
             archetype,
             tendencies,
             aggression_score: aggression,
