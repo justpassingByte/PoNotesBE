@@ -32,10 +32,24 @@ model Player {
   aggression_score Int      @default(0)
   created_at       DateTime @default(now())
   
-  platform         Platform @relation(fields: [platform_id], references: [id])
-  notes            Note[]
+  // AI-generated fields (populated when ai_enabled = true)
+  ai_playstyle        String?
+  ai_aggression_level String?
+  ai_aggression_score Int?
+  ai_gto_baseline     String?
+  ai_exploit_strategy String?
+  ai_stats_used       String?   // JSON array of stat names used
+  ai_analysis_mode    String?   // "simple" | "advanced"
+  ai_range_matrix     Json?     // 13x13 mathematical range logic
+  ai_action_breakdown Json?     // macro action %s (Raise, Call, Fold)
+  ai_last_analyzed_at DateTime?
 
-  @@unique([platform_id, name]) // A player name is unique per platform
+  platform         Platform      @relation(fields: [platform_id], references: [id])
+  notes            Note[]
+  stats            PlayerStats?
+  analysis_contexts AnalysisContext[]
+
+  @@unique([platform_id, name])
 }
 
 model Note {
@@ -44,6 +58,7 @@ model Note {
   street     String
   note_type  String
   content    String
+  source     String   @default("custom") // "template" | "custom"
   created_at DateTime @default(now())
 
   player     Player   @relation(fields: [player_id], references: [id])
@@ -54,4 +69,38 @@ model Template {
   label    String
   category String
   weight   Int    @default(0)
+}
+
+model PlayerStats {
+  id              String @id @default(uuid())
+  player_id       String @unique
+  vpip            Float?
+  rfi             Float?
+  pfr             Float?
+  three_bet       Float?
+  fold_to_3bet    Float?
+  cbet            Float?
+  fold_to_cbet    Float?
+  wtsd            Float?
+  wsd             Float?
+  aggression_freq Float?
+  
+  player          Player @relation(fields: [player_id], references: [id])
+}
+
+model AppSettings {
+  id            String  @id @default("singleton")
+  ai_enabled    Boolean @default(false)
+  analysis_mode String  @default("simple") // "simple" | "advanced"
+}
+
+model AnalysisContext {
+  id            String   @id @default(uuid())
+  player_id     String
+  position      String   // "IP" | "OOP"
+  hero_stack    Float    // hero stack in BB
+  villain_stack Float    // villain stack in BB
+  created_at    DateTime @default(now())
+
+  player        Player   @relation(fields: [player_id], references: [id])
 }

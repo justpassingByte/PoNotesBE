@@ -1,0 +1,88 @@
+{
+    "description": "GTO bet sizing theory by street and situation for common stack depths",
+    "preflop_sizing": {
+        "open_raise": {
+            "100bb": {
+                "sizing": "2.5bb",
+                "rationale": "Standard open at deep stacks; smaller from later positions"
+            },
+            "50bb": {
+                "sizing": "2.2-2.5bb",
+                "rationale": "Slightly smaller opens at medium stacks reduce exposure"
+            },
+            "25bb": {
+                "sizing": "2-2.2bb",
+                "rationale": "Shallower stack demands tighter opens with smaller sizing"
+            }
+        },
+        "3bet": {
+            "ip": {
+                "sizing": "3x open",
+                "rationale": "Position allows smaller 3bet sizing"
+            },
+            "oop": {
+                "sizing": "3.5-4x open",
+                "rationale": "OOP needs larger sizing to reduce opponent's positional edge"
+            }
+        },
+        "4bet": {
+            "sizing": "2.2-2.5x 3bet",
+            "shove_threshold_bb": 25,
+            "rationale": "Below 25bb effective, 4bet = shove with committed stack"
+        }
+    },
+    "postflop_sizing": {
+        "flop": {
+            "small_cbet": {
+                "sizing": "25-33% pot",
+                "use_when": "Range advantage on dry boards; high frequency"
+            },
+            "medium_cbet": {
+                "sizing": "50% pot",
+                "use_when": "Mixed board texture; balanced frequency"
+            },
+            "large_cbet": {
+                "sizing": "66-75% pot",
+                "use_when": "Wet boards; need to charge draws; lower frequency"
+            },
+            "overbet": {
+                "sizing": "100-125% pot",
+                "use_when": "Very polarized range; nut advantage"
+            }
+        },
+        "turn": {
+            "standard": {
+                "sizing": "50-66% pot",
+                "rationale": "Geometric sizing to set up river shove"
+            },
+            "probe_bet": {
+                "sizing": "33% pot",
+                "use_when": "IP after OOP checks flop; pick up dead money"
+            },
+            "overbet": {
+                "sizing": "100-150% pot",
+                "use_when": "Nut advantage, polarized range, deep stack"
+            }
+        },
+        "river": {
+            "value_bet": {
+                "sizing": "55-75% pot",
+                "rationale": "Standard value sizing; price in drawing misses"
+            },
+            "block_bet": {
+                "sizing": "25-33% pot",
+                "use_when": "Thin value or pot control; induce bluff-raises"
+            },
+            "overbet_shove": {
+                "sizing": "pot+ to all-in",
+                "use_when": "Nut hands; maximize value vs. strong calling ranges"
+            }
+        }
+    },
+    "geometric_sizing": {
+        "concept": "Size bets so that betting flop-turn-river puts you all-in by river",
+        "formula": "Each street bet = (remaining stack) / (streets remaining + 1) as a percentage",
+        "example_100bb": "Pot 6bb preflop → Flop 4bb (66%) → Turn 10bb (62%) → River 25bb (60%)",
+        "example_50bb": "Pot 6bb preflop → Flop 3bb (50%) → Turn 7bb (58%) → River all-in"
+    }
+}

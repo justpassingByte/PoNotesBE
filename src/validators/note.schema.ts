@@ -8,6 +8,7 @@ export const createNoteSchema = z.object({
     ),
     note_type: z.enum(['Template', 'Custom']),
     content: z.string().min(1, 'Note content cannot be empty'),
+    source: z.enum(['template', 'custom']).default('custom'),
 });
 
 export const updateNoteSchema = z.object({
@@ -17,4 +18,5 @@ export const updateNoteSchema = z.object({
     ).optional(),
     note_type: z.enum(['Template', 'Custom']).optional(),
     content: z.string().min(1).optional(),
+    source: z.enum(['template', 'custom']).optional(),
 });

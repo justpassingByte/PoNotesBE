@@ -13,7 +13,7 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: allowedOrigins as string[],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true
 }));
 app.use(express.json());
@@ -22,6 +22,12 @@ import { playerRoutes } from './routes/playerRoutes';
 import { noteRoutes } from './routes/noteRoutes';
 import { templateRoutes } from './routes/templateRoutes';
 import { platformRoutes } from './routes/platformRoutes';
+import { settingsRoutes } from './routes/settingsRoutes';
+import { playerStatsRoutes } from './routes/playerStatsRoutes';
+import analyzeRoutes from './routes/analyzeRoutes';
+import { playerProfileRoutes } from './routes/playerProfileRoutes';
+import exploitRoutes from './routes/exploitRoutes';
+import { solverRoutes } from './routes/solverRoutes';
 
 // Routes
 app.get('/', (req, res) => {
@@ -34,7 +40,11 @@ app.get('/', (req, res) => {
             players: '/api/players',
             notes: '/api/notes',
             templates: '/api/templates',
-            platforms: '/api/platforms'
+            platforms: '/api/platforms',
+            settings: '/api/settings',
+            analyze: '/api/players/:playerId/analyze',
+            exploit: '/api/players/:playerId/exploit',
+            solve: '/api/solve'
         }
     });
 });
@@ -44,9 +54,15 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/players', playerRoutes);
+app.use('/api/players/:playerId/analyze', analyzeRoutes);
+app.use('/api/players/:playerId/profile', playerProfileRoutes);
+app.use('/api/players/:playerId/exploit', exploitRoutes);
+app.use('/api/players', playerStatsRoutes);
 app.use('/api/notes', noteRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/platforms', platformRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/solve', solverRoutes);
 
 // Global Error Handler
 app.use(errorHandler);

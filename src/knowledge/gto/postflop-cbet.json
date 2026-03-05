@@ -1,0 +1,67 @@
+{
+    "description": "GTO continuation bet frequencies and sizing guidelines by position and board texture",
+    "ip_cbet": {
+        "dry_boards": {
+            "description": "Rainbow, unpaired, disconnected (e.g., K72r, A83r)",
+            "frequency": 70,
+            "sizing": "33% pot (small sizing exploits range advantage)",
+            "rationale": "IP has significant range advantage on dry boards; small frequent bets are optimal"
+        },
+        "medium_texture": {
+            "description": "One draw possible, semi-connected (e.g., Qs9h4d, Kh8h3c)",
+            "frequency": 60,
+            "sizing": "50% pot",
+            "rationale": "Balanced sizing; some draws in range but still favorable for aggressor"
+        },
+        "wet_boards": {
+            "description": "Flush draw + straight draw possible (e.g., JhTh7c, 9s8s6d)",
+            "frequency": 45,
+            "sizing": "66-75% pot",
+            "rationale": "Need to charge draws; check more often with marginal hands"
+        },
+        "monotone_boards": {
+            "description": "Three of same suit (e.g., Ks8s3s)",
+            "frequency": 35,
+            "sizing": "50% pot or check",
+            "rationale": "Range advantage diminished; many hands check for pot control"
+        }
+    },
+    "oop_cbet": {
+        "dry_boards": {
+            "frequency": 50,
+            "sizing": "33% pot",
+            "rationale": "OOP c-bets less frequently due to positional disadvantage"
+        },
+        "medium_texture": {
+            "frequency": 40,
+            "sizing": "50% pot"
+        },
+        "wet_boards": {
+            "frequency": 30,
+            "sizing": "66% pot",
+            "rationale": "OOP strength check-raises; c-bet only with strong made hands or nut draws"
+        },
+        "monotone_boards": {
+            "frequency": 25,
+            "sizing": "33% pot or check"
+        }
+    },
+    "turn_barrel": {
+        "ip_after_cbet": {
+            "frequency": 55,
+            "blank_turn": "Continue betting with same sizing if turn doesn't change dynamic",
+            "scare_card": "Bet 50-66% pot with strong hands; check with marginal showdown value",
+            "completing_draw": "Check-evaluate with bluffs; value bet thinly with sets+"
+        },
+        "oop_after_cbet": {
+            "frequency": 40,
+            "notes": "OOP double-barrels are polarized: value or strong semi-bluffs only"
+        }
+    },
+    "river_value": {
+        "thin_value_threshold": "Bet river for value with hands beating >55% of opponent's calling range",
+        "ip_river_bet_pct": 45,
+        "oop_river_bet_pct": 30,
+        "block_bet_sizing": "25-33% pot (polarize at lower frequencies)"
+    }
+}
