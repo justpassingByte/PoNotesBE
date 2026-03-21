@@ -36,6 +36,12 @@ router.get(
     asyncErrorWrapper((req, res) => controller.getById(req, res))
 );
 
+// Delete player
+router.delete(
+    '/:id',
+    asyncErrorWrapper((req, res) => controller.delete(req, res))
+);
+
 // Trigger re-analysis/aggregation (quota-gated because it uses LLM)
 router.post(
     '/profile/refresh',

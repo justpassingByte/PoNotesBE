@@ -42,9 +42,6 @@ export class NoteService {
             player_id: playerId
         } as any);
 
-        // 4. Trigger AI analysis (fire-and-forget)
-        this.triggerAIAnalysis(playerId);
-
         return note;
     }
 
@@ -53,11 +50,6 @@ export class NoteService {
         const validatedData = updateNoteSchema.parse(payload);
         const note = await this.noteRepository.update(userId, noteId, validatedData);
 
-        // Trigger AI re-analysis
-        if (note.player_id) {
-            this.triggerAIAnalysis(note.player_id);
-        }
-
         return note;
     }
 
@@ -65,13 +57,9 @@ export class NoteService {
         if (!noteId) throw new Error('Note ID is required');
         const note = await this.noteRepository.delete(userId, noteId);
 
-        // Trigger AI re-analysis after deletion
-        if (note.player_id) {
-            this.triggerAIAnalysis(note.player_id);
-        }
-
         return note;
     }
+
 
     /**
      * Trigger the new ProfileAggregator pipeline.

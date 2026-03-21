@@ -219,4 +219,29 @@ export class PlayerController {
             res.status(400).json({ success: false, error: error.message || 'Failed to bulk import players' });
         }
     }
+    /**
+     * Delete a player and all their notes
+     */
+    async delete(req: Request, res: Response) {
+        try {
+            const id = req.params.id as string;
+            const userId = (req as any).user.id;
+
+            await prisma.player.delete({
+                where: { 
+                    id,
+                    user_id: userId
+                }
+            });
+
+            // Invalidate caches
+            clearPlayerCache(userId);
+            clearDashboardCache(userId);
+
+            res.json({ success: true, message: 'Player deleted successfully' });
+        } catch (error) {
+            console.error('[PlayerController] Delete Error:', error);
+            res.status(500).json({ success: false, error: 'Failed to delete player' });
+        }
+    }
 }
