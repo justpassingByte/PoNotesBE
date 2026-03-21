@@ -1,10 +1,27 @@
-// @ts-nocheck
 import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 async function main() {
     console.log('Seeding the database...');
+
+    // 0. Create Admin User
+    const adminPassword = await bcrypt.hash('admin', 10);
+    const admin = await prisma.user.upsert({
+        where: { email: 'admin' },
+        update: { 
+            password: adminPassword,
+            premium_tier: 'PRO_PLUS'
+        },
+        create: {
+            email: 'admin',
+            password: adminPassword,
+            premium_tier: 'PRO_PLUS',
+            max_devices: 5
+        }
+    });
+    console.log('Created/Updated admin user.');
 
     // 1. Create Platforms
     const wptPlatform = await prisma.platform.upsert({
@@ -44,14 +61,15 @@ async function main() {
     // 3. Create Mock Players
     const player1 = await prisma.player.create({
         data: {
+            user_id: admin.id,
             name: 'PhilIveyFan99',
             platform_id: wptPlatform.id,
             playstyle: 'LAG',
             aggression_score: 55,
             notes: {
                 create: [
-                    { street: 'Preflop', note_type: 'Template', content: '3-bet light' },
-                    { street: 'Flop', note_type: 'Template', content: 'C-bet 100%' }
+                    { user_id: admin.id, street: 'Preflop', note_type: 'Template', content: '3-bet light' },
+                    { user_id: admin.id, street: 'Flop', note_type: 'Template', content: 'C-bet 100%' }
                 ]
             }
         }
@@ -59,14 +77,15 @@ async function main() {
 
     const player2 = await prisma.player.create({
         data: {
+            user_id: admin.id,
             name: 'NitMasterFlex',
             platform_id: ggPlatform.id,
             playstyle: 'Nit',
             aggression_score: -15,
             notes: {
                 create: [
-                    { street: 'River', note_type: 'Template', content: 'Never bluffs river' },
-                    { street: 'Turn', note_type: 'Template', content: 'Overfold to turn barrel' }
+                    { user_id: admin.id, street: 'River', note_type: 'Template', content: 'Never bluffs river' },
+                    { user_id: admin.id, street: 'Turn', note_type: 'Template', content: 'Overfold to turn barrel' }
                 ]
             }
         }

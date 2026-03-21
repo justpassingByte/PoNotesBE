@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import { PlayerRepository } from '../repositories/PlayerRepository';
 import { bulkImportSchema, createPlayerSchema } from '../validators/player.schema';
 
@@ -17,17 +18,16 @@ function calculateAggression(playstyle: string): number {
 export class PlayerService {
     constructor(private readonly playerRepository: PlayerRepository) { }
 
-    async getAllPlayers() {
-        return this.playerRepository.findAll();
+    async getAllPlayers(userId: string) {
+        return this.playerRepository.findAll(userId);
     }
 
-    async getPlayersPaginated(limit: number, cursor?: string) {
+    async getPlayersPaginated(userId: string, limit: number, cursor?: string) {
         const [players, stats] = await Promise.all([
-            this.playerRepository.findPaginated(limit, cursor),
-            this.playerRepository.getAggregateStats()
+            this.playerRepository.findPaginated(userId, limit, cursor),
+            this.playerRepository.getAggregateStats(userId)
         ]);
 
-        // Flatten _count.notes into notesCount
         const flattened = (players as any[]).map((p: any) => ({
             ...p,
             notesCount: p._count?.notes || 0,
@@ -49,30 +49,29 @@ export class PlayerService {
         };
     }
 
-    async exportAllPlayers() {
-        return this.playerRepository.findAllWithNotes();
+    async exportAllPlayers(userId: string) {
+        return this.playerRepository.findAllWithNotes(userId);
     }
 
-    async getPlayerById(id: string) {
-        const player = await this.playerRepository.findById(id);
+    async getPlayerById(userId: string, id: string) {
+        const player = await this.playerRepository.findById(userId, id);
         if (!player) {
-            throw new Error(`Player with ID ${id} not found`);
+            throw new Error(`Player with ID ${id} not found or access denied`);
         }
         return player;
     }
 
-    async createPlayer(payload: unknown) {
+    async createPlayer(userId: string, payload: unknown) {
         const validatedData = createPlayerSchema.parse(payload);
-        // Auto-calculate aggression from playstyle
         const dataWithAggression = {
             ...validatedData,
+            user_id: userId,
             aggression_score: calculateAggression(validatedData.playstyle || 'UNKNOWN')
         };
         return this.playerRepository.create(dataWithAggression);
     }
 
-    async updatePlayer(id: string, payload: unknown) {
-        // Allow partial updates — name, playstyle, aggression_score
+    async updatePlayer(userId: string, id: string, payload: unknown) {
         const data: any = {};
         const body = payload as any;
         if (body.name) data.name = body.name;
@@ -81,21 +80,70 @@ export class PlayerService {
             data.aggression_score = calculateAggression(body.playstyle);
         }
         if (body.aggression_score !== undefined) data.aggression_score = body.aggression_score;
-        return this.playerRepository.update(id, data);
+        return this.playerRepository.update(userId, id, data);
     }
 
-    async deletePlayer(id: string) {
+    async deletePlayer(userId: string, id: string) {
         if (!id) throw new Error('Player ID is required');
-        return this.playerRepository.delete(id);
+        return this.playerRepository.delete(userId, id);
     }
 
-    async bulkCreatePlayers(payload: unknown) {
+    async getOrCreatePlayerByName(userId: string, name: string, platformId?: string) {
+        const existing = await this.playerRepository.findByName(userId, name);
+        if (existing) return existing;
+
+        let targetPlatformId = platformId;
+
+        if (!targetPlatformId) {
+            const platforms = await prisma.platform.findMany({ take: 1 });
+            if (platforms.length === 0) {
+                const defaultPlatform = await prisma.platform.create({
+                    data: { name: 'Default Platform' }
+                });
+                targetPlatformId = defaultPlatform.id;
+            } else {
+                targetPlatformId = platforms[0].id;
+            }
+        }
+
+        return this.playerRepository.create({
+            user_id: userId,
+            name,
+            platform_id: targetPlatformId,
+            playstyle: 'UNKNOWN',
+            aggression_score: 0
+        });
+    }
+
+    async bulkCreatePlayers(userId: string, payload: unknown) {
         const validatedData = bulkImportSchema.parse(payload);
-        // Auto-calculate aggression score for each player
-        const enriched = validatedData.map(player => ({
-            ...player,
-            aggression_score: calculateAggression(player.playstyle || 'UNKNOWN')
-        }));
-        return this.playerRepository.bulkCreate(enriched);
+        
+        // Ensure we have a fallback platform
+        const platforms = await prisma.platform.findMany();
+        const firstPlatformId = platforms.length > 0 ? platforms[0].id : null;
+
+        const enriched = [];
+        for (const player of validatedData as any[]) {
+            let platformId = player.platform_id;
+            
+            // If ID doesn't exist or is invalid, try to find by name
+            if (player.platform_name) {
+                const p = platforms.find(pl => pl.name.toLowerCase() === player.platform_name.toLowerCase());
+                if (p) platformId = p.id;
+            }
+            
+            // If still no ID or not in our DB, use first available platform
+            if (!platformId || !platforms.some(pl => pl.id === platformId)) {
+                platformId = firstPlatformId;
+            }
+
+            enriched.push({
+                ...player,
+                platform_id: platformId,
+                aggression_score: calculateAggression(player.playstyle || 'UNKNOWN')
+            });
+        }
+        
+        return this.playerRepository.bulkCreate(userId, enriched as any);
     }
 }

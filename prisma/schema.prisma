@@ -13,10 +13,72 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id    String @id @default(uuid())
-  email String @unique
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum PremiumTier {
+  FREE
+  PRO
+  PRO_PLUS
+  ENTERPRISE
 }
+
+enum InvoiceStatus {
+  PENDING
+  FINISHED
+  FAILED
+}
+
+enum UsageActionType {
+  AI_ANALYZE
+  OCR_NAME
+  OCR_HAND
+}
+
+// ─── User & Account ─────────────────────────────────────────────────────────
+
+model User {
+  id                  String       @id @default(uuid())
+  email               String       @unique
+  password            String       @default("$2b$10$wzN27C5fWn8.fC/O8v.7.OWY4uNfF/0uO2O8O8O8O8O8O8O8O8O8O") // Default 'admin' hashed for seeding
+  premium_tier        PremiumTier  @default(FREE)
+  subscription_expiry DateTime?
+  max_devices         Int          @default(2)
+  created_at          DateTime     @default(now())
+
+  sessions Session[]
+  usages   UserUsage[]
+  hands    Hand[]
+  invoices Invoice[]
+  players  Player[]    @relation("UserPlayers")
+  notes    Note[]      @relation("UserNotes")
+}
+
+model Session {
+  id          String   @id @default(uuid())
+  user_id     String
+  device_id   String
+  ip_address  String?
+  last_active DateTime @default(now())
+  created_at  DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, device_id])
+}
+
+model UserUsage {
+  id           String          @id @default(uuid())
+  user_id      String
+  action_type  UsageActionType
+  count        Int             @default(0)
+  period_start DateTime        @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, action_type, period_start])
+}
+
+// ─── Poker Data ──────────────────────────────────────────────────────────────
 
 model Platform {
   id      String   @id @default(uuid())
@@ -26,12 +88,14 @@ model Platform {
 
 model Player {
   id               String   @id @default(uuid())
+  user_id          String
   platform_id      String
   name             String
   playstyle        String?
   aggression_score Int      @default(0)
+  looseness_score  Int      @default(0)
   created_at       DateTime @default(now())
-  
+
   // AI-generated fields (populated when ai_enabled = true)
   ai_playstyle        String?
   ai_aggression_level String?
@@ -44,24 +108,55 @@ model Player {
   ai_action_breakdown Json?     // macro action %s (Raise, Call, Fold)
   ai_last_analyzed_at DateTime?
 
-  platform         Platform      @relation(fields: [platform_id], references: [id])
-  notes            Note[]
-  stats            PlayerStats?
+  // New: Aggregated AI profile from notes (tendencies, leaks, exploitStrategy)
+  ai_profile          Json?
+
+  user              User             @relation("UserPlayers", fields: [user_id], references: [id], onDelete: Cascade)
+  platform          Platform         @relation(fields: [platform_id], references: [id])
+  notes             Note[]
+  stats             PlayerStats?
   analysis_contexts AnalysisContext[]
 
-  @@unique([platform_id, name])
+  @@unique([user_id, platform_id, name])
+  @@index([user_id])
+  @@index([name])
+  @@index([created_at])
+  @@index([user_id, playstyle]) // Optimized for dashboard grouping
 }
 
 model Note {
   id         String   @id @default(uuid())
+  user_id    String
   player_id  String
   street     String
   note_type  String
   content    String
   source     String   @default("custom") // "template" | "custom"
+  hand_id    String?  // Optional link to analyzed hand
   created_at DateTime @default(now())
 
-  player     Player   @relation(fields: [player_id], references: [id])
+  user   User   @relation("UserNotes", fields: [user_id], references: [id], onDelete: Cascade)
+  player Player @relation(fields: [player_id], references: [id])
+  hand   Hand?  @relation(fields: [hand_id], references: [id])
+
+  @@index([user_id])
+}
+
+model Hand {
+  id           String   @id @default(uuid())
+  user_id      String
+  hand_hash    String   @unique // Canonical hash for caching
+  raw_input    String   // Original text or image URL
+  input_type   String   @default("text") // "text" | "image"
+  parsed_data  Json?    // Structured hand JSON (positions, actions, board)
+  ai_analysis  Json?    // AI output: heroMistakes, villainMistakes, betterLine, exploit
+  tags         String[] @default([])
+  created_at   DateTime @default(now())
+
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  notes Note[]
+
+  @@index([user_id])
 }
 
 model Template {
@@ -84,8 +179,8 @@ model PlayerStats {
   wtsd            Float?
   wsd             Float?
   aggression_freq Float?
-  
-  player          Player @relation(fields: [player_id], references: [id])
+
+  player Player @relation(fields: [player_id], references: [id])
 }
 
 model AppSettings {
@@ -102,5 +197,21 @@ model AnalysisContext {
   villain_stack Float    // villain stack in BB
   created_at    DateTime @default(now())
 
-  player        Player   @relation(fields: [player_id], references: [id])
+  player Player @relation(fields: [player_id], references: [id])
+}
+
+// ─── Payments ────────────────────────────────────────────────────────────────
+
+model Invoice {
+  id             String        @id @default(uuid())
+  user_id        String
+  nowpayments_id String?       @unique // External payment provider ID
+  amount         Float
+  currency       String        @default("USD")
+  status         InvoiceStatus @default(PENDING)
+  tier_requested PremiumTier
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 }

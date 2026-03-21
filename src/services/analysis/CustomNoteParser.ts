@@ -1,9 +1,8 @@
-import { getGeminiClient } from '../../lib/gemini';
 import { ParsedSignal, AIParseResult } from './types';
 
 /**
  * Layer A: Signal Extraction (AI Layer)
- * AI-powered custom note parser using Gemini.
+ * AI-powered custom note parser using Groq.
  * Extracts low-level structured behavioral signals from raw text notes.
  * STRICTLY internal output. Must not attempt to aggregate, profile, or suggest exploits.
  */
@@ -15,25 +14,17 @@ export class CustomNoteParser {
     async parse(customNotes: string[]): Promise<AIParseResult> {
         if (customNotes.length === 0) return { parsed_signals: [], parse_confidence: 1.0, source: 'custom_ai' };
 
-        const client = getGeminiClient();
-        if (!client) {
-            console.log('[CustomNoteParser] Gemini client not available, skipping custom note parsing');
+        const apiKey = process.env.GROQ_API_KEY;
+        if (!apiKey) {
+            console.log('[CustomNoteParser] Groq key not available, skipping custom note parsing');
             return { parsed_signals: [], parse_confidence: 1.0, source: 'custom_ai' };
         }
 
-        const model = client.getGenerativeModel({
-            model: 'gemini-2.0-flash',
-            generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.1, // Low temperature for deterministic extraction
-            },
-        });
-
-        console.log(`[CustomNoteParser] Starting parallel parsing of ${customNotes.length} notes...`);
+        console.log(`[CustomNoteParser] Starting parallel parsing of ${customNotes.length} notes via Groq...`);
 
         // Parse all notes in parallel with graceful error handling
         const results = await Promise.allSettled(
-            customNotes.map(note => this.parseSingleNote(model, note))
+            customNotes.map(note => this.parseSingleNote(apiKey, note))
         );
 
         const signals: ParsedSignal[] = [];
@@ -72,23 +63,36 @@ export class CustomNoteParser {
         };
     }
 
-    private async parseSingleNote(model: any, noteText: string): Promise<AIParseResult> {
+    private async parseSingleNote(apiKey: string, noteText: string): Promise<AIParseResult> {
         const prompt = this.buildPrompt(noteText);
         const maxRetries = 2;
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
+                const OpenAI = require('openai');
+                const groq = new OpenAI({
+                    apiKey: apiKey,
+                    baseURL: 'https://api.groq.com/openai/v1'
+                });
+
                 console.log(`\n--- [CustomNoteParser] AI PROMPT (Attempt ${attempt + 1}) ---`);
                 console.log(prompt);
                 console.log(`---------------------------------------------------\n`);
 
-                const result = await model.generateContent(prompt);
-                const text = result.response.text();
+                const completion = await groq.chat.completions.create({
+                    messages: [
+                        { role: 'system', content: prompt }
+                    ],
+                    model: 'llama-3.3-70b-versatile',
+                    response_format: { type: 'json_object' },
+                    temperature: 0.1
+                });
 
-                // Add raw response log
-                console.log(`\n--- [CustomNoteParser] AI RESPONSE (Attempt ${attempt + 1}) ---`);
+                const text = completion.choices[0].message.content || '{}';
+
+                console.log(`--- [CustomNoteParser] AI RAW RESPONSE ---`);
                 console.log(text);
-                console.log(`------------------------------------------------------\n`);
+                console.log(`--------------------------------------------\n`);
 
                 const parsed = JSON.parse(text) as any;
 
@@ -118,8 +122,6 @@ export class CustomNoteParser {
             } catch (error: any) {
                 const is429 = error?.status === 429 || error?.message?.includes('429');
 
-                // If it's a 429, Gemini often tells us how long to wait (e.g., "retryDelay: 50s")
-                // If the wait is very long, it's better to immediately skip the note than hang the UI for a minute.
                 if (is429) {
                     console.warn(`[CustomNoteParser] Rate limited on note "${noteText.substring(0, 30)}...". Returning MOCK response.`);
                     return this.getMockResponse(noteText);
@@ -132,7 +134,6 @@ export class CustomNoteParser {
                     continue;
                 }
 
-                // Log a clean 1-line message instead of a giant stack trace
                 const errMsg = error?.message || 'Unknown error';
                 console.warn(`[CustomNoteParser] Failed to parse note after retries: ${errMsg.split('\n')[0]}. Returning MOCK response.`);
                 return this.getMockResponse(noteText);

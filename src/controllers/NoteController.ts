@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { BaseController } from './BaseController';
 import { NoteService } from '../services/noteService';
 import { z } from 'zod';
+import { clearPlayerCache, clearDashboardCache } from '../lib/cache';
 
 export class NoteController extends BaseController {
     constructor(private readonly noteService: NoteService) {
@@ -11,7 +12,8 @@ export class NoteController extends BaseController {
     async getByPlayer(req: Request, res: Response) {
         try {
             const { playerId } = req.params;
-            const notes = await this.noteService.getPlayerNotes(playerId as string);
+            const userId = (req as any).user.id;
+            const notes = await this.noteService.getPlayerNotes(userId, playerId as string);
             this.handleSuccess(res, notes);
         } catch (error) {
             this.handleError(error, res, 'NoteController.getByPlayer');
@@ -20,7 +22,13 @@ export class NoteController extends BaseController {
 
     async create(req: Request, res: Response) {
         try {
-            const note = await this.noteService.createNote(req.body);
+            const userId = (req as any).user.id;
+            const note = await this.noteService.createNote(userId, req.body);
+            
+            // Invalidate caches
+            clearPlayerCache(userId);
+            clearDashboardCache(userId);
+
             this.handleSuccess(res, note, 201);
         } catch (error) {
             // Handle Zod Validation Errors Specially
@@ -37,7 +45,13 @@ export class NoteController extends BaseController {
     async delete(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            await this.noteService.deleteNote(id as string);
+            const userId = (req as any).user.id;
+            await this.noteService.deleteNote(userId, id as string);
+
+            // Invalidate caches
+            clearPlayerCache(userId);
+            clearDashboardCache(userId);
+
             this.handleSuccess(res, { deleted: true });
         } catch (error) {
             this.handleError(error, res, 'NoteController.delete');
@@ -47,7 +61,13 @@ export class NoteController extends BaseController {
     async update(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            const note = await this.noteService.updateNote(id as string, req.body);
+            const userId = (req as any).user.id;
+            const note = await this.noteService.updateNote(userId, id as string, req.body);
+            
+            // Invalidate caches
+            clearPlayerCache(userId);
+            clearDashboardCache(userId);
+
             this.handleSuccess(res, note);
         } catch (error) {
             if (error instanceof z.ZodError) {

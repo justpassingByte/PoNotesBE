@@ -1,22 +1,46 @@
 import { Router } from 'express';
 import { PlayerController } from '../controllers/PlayerController';
-import { PlayerService } from '../services/playerService';
-import { PlayerRepository } from '../repositories/PlayerRepository';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
+import { checkUsageQuota } from '../middleware/usageMiddleware';
 
 const router = Router();
+const controller = new PlayerController();
 
-// Dependency Injection Setup
-const repository = new PlayerRepository();
-const service = new PlayerService(repository);
-const controller = new PlayerController(service);
+// List / Pagination
+router.get(
+    '/',
+    asyncErrorWrapper((req, res) => controller.list(req, res))
+);
 
-router.get('/', asyncErrorWrapper((req, res) => controller.getAll(req, res)));
-router.get('/export', asyncErrorWrapper((req, res) => controller.exportAll(req, res)));
-router.post('/bulk', asyncErrorWrapper((req, res) => controller.bulkCreate(req, res)));
-router.post('/', asyncErrorWrapper((req, res) => controller.create(req, res)));
-router.get('/:id', asyncErrorWrapper((req, res) => controller.getById(req, res)));
-router.put('/:id', asyncErrorWrapper((req, res) => controller.update(req, res)));
-router.delete('/:id', asyncErrorWrapper((req, res) => controller.delete(req, res)));
+// Bulk Create / Import
+router.post(
+    '/bulk',
+    asyncErrorWrapper((req, res) => controller.bulkCreate(req, res))
+);
+
+// Export all data (Must come before :id route)
+router.get(
+    '/export',
+    asyncErrorWrapper((req, res) => controller.export(req, res))
+);
+
+// Get profile
+router.get(
+    '/profile', 
+    asyncErrorWrapper((req, res) => controller.getProfile(req, res))
+);
+
+// Get by ID
+router.get(
+    '/:id',
+    asyncErrorWrapper((req, res) => controller.getById(req, res))
+);
+
+// Trigger re-analysis/aggregation (quota-gated because it uses LLM)
+router.post(
+    '/profile/refresh',
+    checkUsageQuota('AI_ANALYZE'), // Re-profiling uses LLM tokens
+    asyncErrorWrapper((req, res) => controller.refreshProfile(req, res))
+);
 
 export const playerRoutes = router;

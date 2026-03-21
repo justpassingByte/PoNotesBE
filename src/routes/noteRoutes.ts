@@ -2,13 +2,17 @@ import { Router } from 'express';
 import { NoteController } from '../controllers/NoteController';
 import { NoteService } from '../services/noteService';
 import { NoteRepository } from '../repositories/NoteRepository';
+import { PlayerService } from '../services/playerService';
+import { PlayerRepository } from '../repositories/PlayerRepository';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
 
 const router = Router();
 
 // Dependency Injection Setup
 const repository = new NoteRepository();
-const service = new NoteService(repository);
+const playerRepository = new PlayerRepository();
+const playerService = new PlayerService(playerRepository);
+const service = new NoteService(repository, playerService);
 const controller = new NoteController(service);
 
 router.get('/player/:playerId', asyncErrorWrapper((req, res) => controller.getByPlayer(req, res)));

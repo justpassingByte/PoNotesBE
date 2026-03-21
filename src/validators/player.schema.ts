@@ -2,8 +2,10 @@ import { z } from 'zod';
 
 export const bulkImportSchema = z.array(z.object({
     name: z.string().min(1, 'Name is required'),
-    platform_id: z.string().uuid('Invalid platform ID'),
+    platform_id: z.string().uuid('Invalid platform ID').optional(),
+    platform_name: z.string().optional(),
     playstyle: z.string().optional().default('UNKNOWN'),
+    ai_profile: z.any().optional(),
     notes: z.array(z.object({
         street: z.string().refine(
             (val) => ['Preflop', 'Postflop', 'Flop', 'Turn', 'River'].includes(val),
