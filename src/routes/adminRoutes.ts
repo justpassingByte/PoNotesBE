@@ -31,7 +31,7 @@ router.get('/pricing', isAdmin, asyncErrorWrapper(async (req, res) => {
 
 // POST /api/admin/pricing - Create or update a plan
 router.post('/pricing', isAdmin, asyncErrorWrapper(async (req, res) => {
-    const { id, name, price, description, features, ai_limit, ocr_limit, is_popular, color_theme } = req.body;
+    const { id, name, price, description, features, ai_limit, name_ocr_limit, hand_ocr_limit, max_devices, is_popular, color_theme } = req.body;
 
     const plan = await (prisma as any).pricingPlan.upsert({
         where: { id },
@@ -41,7 +41,9 @@ router.post('/pricing', isAdmin, asyncErrorWrapper(async (req, res) => {
             description,
             features,
             ai_limit: parseInt(ai_limit),
-            ocr_limit: parseInt(ocr_limit),
+            name_ocr_limit: parseInt(name_ocr_limit) || 0,
+            hand_ocr_limit: parseInt(hand_ocr_limit) || 0,
+            max_devices: parseInt(max_devices) || 1,
             is_popular,
             color_theme
         },
@@ -52,7 +54,9 @@ router.post('/pricing', isAdmin, asyncErrorWrapper(async (req, res) => {
             description,
             features,
             ai_limit: parseInt(ai_limit),
-            ocr_limit: parseInt(ocr_limit),
+            name_ocr_limit: parseInt(name_ocr_limit) || 0,
+            hand_ocr_limit: parseInt(hand_ocr_limit) || 0,
+            max_devices: parseInt(max_devices) || 1,
             is_popular: is_popular || false,
             color_theme: color_theme || 'gold'
         }
@@ -108,6 +112,13 @@ router.post('/pricing/seed', isAdmin, asyncErrorWrapper(async (req, res) => {
     }
 
     res.json({ success: true, message: 'Pricing plans seeded successfully' });
+}));
+
+// DELETE /api/admin/pricing/:id - Delete a plan
+router.delete('/pricing/:id', isAdmin, asyncErrorWrapper(async (req, res) => {
+    const { id } = req.params;
+    await (prisma as any).pricingPlan.delete({ where: { id } });
+    res.json({ success: true, message: 'Plan deleted' });
 }));
 
 // GET /api/admin/stats - Overview stats

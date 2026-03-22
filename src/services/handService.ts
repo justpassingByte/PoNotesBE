@@ -362,10 +362,15 @@ If the Rule Engine says it's a mistake, analyze it as such. Do NOT contradict th
         return this.handRepository.findByUserId(userId, options);
     }
 
-    /**
-     * Get a single hand by ID.
-     */
     async getHandById(userId: string, id: string) {
         return this.handRepository.findById(userId, id);
+    }
+
+    /**
+     * Delete a single hand by ID.
+     */
+    async deleteHand(userId: string, id: string) {
+        const result = await this.handRepository.delete(userId, id);
+        return !!result;
     }
 }

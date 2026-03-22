@@ -57,17 +57,20 @@ model User {
 // ─── Dynamic Pricing ─────────────────────────────────────────────────────────
 
 model PricingPlan {
-  id          String      @id // Connects to PremiumTier enum string (FREE, PRO, etc.)
-  name        String
-  price       Float
-  period      String      @default("/month")
-  description String
-  features    String[]    // Array of feature descriptions
-  ai_limit    Int         // Limit per period (-1 for unlimited)
-  ocr_limit   Int         // Limit per period (-1 for unlimited)
-  is_popular  Boolean     @default(false)
-  color_theme String      @default("gold") // gold, purple, blue, emerald
-  updated_at  DateTime    @updatedAt
+  id              String      @id // Connects to PremiumTier enum string (FREE, PRO, etc.)
+  name            String
+  price           Float
+  period          String      @default("/month")
+  description     String
+  features        String[]    // Array of feature descriptions
+  ai_limit        Int         @default(0) // AI Analysis per day
+  name_ocr_limit  Int         @default(0) // Name OCR per day
+  hand_ocr_limit  Int         @default(0) // Hand OCR per day
+  max_devices     Int         @default(1) // Max devices allowed
+  ocr_limit       Int         @default(0) // Fallback/Generic OCR limit
+  is_popular      Boolean     @default(false)
+  color_theme     String      @default("gold") // gold, purple, blue, emerald
+  updated_at      DateTime    @updatedAt
 }
 
 model Session {

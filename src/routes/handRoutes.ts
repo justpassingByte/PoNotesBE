@@ -34,4 +34,7 @@ router.get('/history', asyncErrorWrapper((req, res) => controller.getHistory(req
 // Single hand by ID
 router.get('/:id', asyncErrorWrapper((req, res) => controller.getById(req, res)));
 
+// Delete a hand
+router.delete('/:id', asyncErrorWrapper((req, res) => controller.deleteHand(req, res)));
+
 export const handRoutes = router;

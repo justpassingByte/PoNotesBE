@@ -55,19 +55,6 @@ export class HandController extends BaseController {
                 tier
             });
 
-            // The provided snippet seems to be intended for HandService, not HandController.
-            // HandController should call HandService, and HandService would handle repository updates.
-            // Assuming the instruction meant to ensure the HandService call is correct and
-            // the update logic is handled within the service, as the controller should not
-            // directly interact with repositories.
-            // The original code already calls `this.handService.analyzeHand`.
-            // If there was an issue with `HandService.update` it would be in the service itself.
-            // The instruction also mentions "HandController.getById call" but the snippet is for analyzeHand.
-            // Given the snippet's content, it's likely a misplacement.
-            // The current `analyzeHand` method correctly calls the service.
-            // No change is made here based on the provided snippet as it would introduce a non-existent `handRepository`
-            // into the controller, which is not its responsibility.
-
             this.handleSuccess(res, { analysis }, 200);
         } catch (error) {
             this.handleError(error, res, 'HandController.analyzeHand');
@@ -114,6 +101,25 @@ export class HandController extends BaseController {
             this.handleSuccess(res, hand);
         } catch (error) {
             this.handleError(error, res, 'HandController.getById');
+        }
+    }
+
+    /**
+     * DELETE /api/hands/:id
+     */
+    async deleteHand(req: Request, res: Response) {
+        try {
+            const id = req.params.id as string;
+            const userId = (req as any).user.id;
+            const success = await this.handService.deleteHand(userId, id);
+
+            if (!success) {
+                return res.status(404).json({ success: false, error: 'Hand not found' });
+            }
+
+            this.handleSuccess(res, { success: true, message: 'Hand deleted' });
+        } catch (error) {
+            this.handleError(error, res, 'HandController.deleteHand');
         }
     }
 }

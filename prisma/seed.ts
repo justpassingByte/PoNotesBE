@@ -12,13 +12,15 @@ async function main() {
         where: { email: 'admin' },
         update: { 
             password: adminPassword,
-            premium_tier: 'PRO_PLUS'
+            premium_tier: 'PRO_PLUS',
+            is_admin: true
         },
         create: {
             email: 'admin',
             password: adminPassword,
             premium_tier: 'PRO_PLUS',
-            max_devices: 5
+            max_devices: 5,
+            is_admin: true
         }
     });
     console.log('Created/Updated admin user.');
@@ -30,9 +32,11 @@ async function main() {
             name: "Trial",
             price: 0,
             description: "Standard access for casual players wanting to see what AI can do.",
-            features: ["2 AI Analysis / Day", "5 Name OCR / Day", "2 Full Hand OCR / Day", "Basic Player Profiles"],
+            features: ["Full Hand OCR", "Basic Player Profiles"],
             ai_limit: 2,
-            ocr_limit: 2,
+            name_ocr_limit: 10,
+            hand_ocr_limit: 5,
+            max_devices: 1,
             is_popular: false,
             color_theme: "blue"
         },
@@ -41,9 +45,11 @@ async function main() {
             name: "Pro",
             price: 29,
             description: "For serious grinders playing multiple sessions per week.",
-            features: ["100 AI Analysis / Month", "100 Full OCR / Month", "Advanced Leak Detection", "Exploit Strategy"],
+            features: ["Full Hand OCR", "Leak Detection", "Exploit Finder"],
             ai_limit: 100,
-            ocr_limit: 100,
+            name_ocr_limit: 500,
+            hand_ocr_limit: 200,
+            max_devices: 2,
             is_popular: true,
             color_theme: "gold"
         },
@@ -52,9 +58,11 @@ async function main() {
             name: "Elite",
             price: 59,
             description: "Unleash the full power of Claude 3.5 Sonnet logic.",
-            features: ["500 AI Analysis / Month", "300 Full OCR / Month", "GTO Baseline Comparison", "VGG OCR"],
+            features: ["Full Hand OCR", "Leak Detection", "Exploit Finder", "Premium VGG OCR"],
             ai_limit: 500,
-            ocr_limit: 300,
+            name_ocr_limit: 2000,
+            hand_ocr_limit: 1000,
+            max_devices: 5,
             is_popular: false,
             color_theme: "purple"
         }
@@ -70,17 +78,14 @@ async function main() {
     console.log('Created/Updated pricing plans.');
 
     // 1. Create Platforms
-    const wptPlatform = await prisma.platform.upsert({
-        where: { name: 'WPT Poker' },
-        update: {},
-        create: { name: 'WPT Poker' },
-    });
-
-    const ggPlatform = await prisma.platform.upsert({
-        where: { name: 'GG Poker' },
-        update: {},
-        create: { name: 'GG Poker' },
-    });
+    const platforms = ['WPT Poker', 'GG Poker', 'PokerStars', '888Poker', 'CoinPoker'];
+    for (const p of platforms) {
+        await prisma.platform.upsert({
+            where: { name: p },
+            update: {},
+            create: { name: p },
+        });
+    }
 
     console.log('Created platforms.');
 
@@ -97,47 +102,14 @@ async function main() {
         { label: 'Never bluffs river', category: 'Postflop', weight: -3 },
     ];
 
+    // Use transaction to avoid duplicates if run multiple times
     for (const t of templatesData) {
-        await prisma.template.create({
-            data: t
-        });
+        const existing = await prisma.template.findFirst({ where: { label: t.label } });
+        if (!existing) {
+            await prisma.template.create({ data: t });
+        }
     }
     console.log('Created note templates.');
-
-    // 3. Create Mock Players
-    const player1 = await prisma.player.create({
-        data: {
-            user_id: admin.id,
-            name: 'PhilIveyFan99',
-            platform_id: wptPlatform.id,
-            playstyle: 'LAG',
-            aggression_score: 55,
-            notes: {
-                create: [
-                    { user_id: admin.id, street: 'Preflop', note_type: 'Template', content: '3-bet light' },
-                    { user_id: admin.id, street: 'Flop', note_type: 'Template', content: 'C-bet 100%' }
-                ]
-            }
-        }
-    });
-
-    const player2 = await prisma.player.create({
-        data: {
-            user_id: admin.id,
-            name: 'NitMasterFlex',
-            platform_id: ggPlatform.id,
-            playstyle: 'Nit',
-            aggression_score: -15,
-            notes: {
-                create: [
-                    { user_id: admin.id, street: 'River', note_type: 'Template', content: 'Never bluffs river' },
-                    { user_id: admin.id, street: 'Turn', note_type: 'Template', content: 'Overfold to turn barrel' }
-                ]
-            }
-        }
-    });
-
-    console.log('Created mock players and notes.');
 
     console.log('Seeding finished.');
 }
