@@ -108,6 +108,12 @@ ${aggressionRules}
 - [DEPTH_CONSTRAINT]: ${depth === 'Quick' ? 'Summary only. 1 key leak.' : 'Full multi-street logic chain required.'}
 ${toggles.softInference ? "- [MODIFIER]: SOFT_INFERENCE_ENABLED (Allow logic derived from situational outliers)." : ""}
 ${toggles.forceExploit ? "- [MODIFIER]: FORCE_EXPLOIT (Always derive an attack vector, even on low data)." : ""}
+
+### VERIFIED MEMORY BIAS (HIGHEST PRIORITY):
+If a verified pattern exists in the context, you MUST shift your mathematical baseline to account for it.
+- If they "overfold", increase your bluffing frequency by at least 20%.
+- If they "overcall" or are "sticky", reduce bluffing to near zero and expand your value-betting range thinner.
+- If they "over-aggress", increase your trap/check-raise frequency with strong hands and widen your call-down range.
 `;
 
     const systemFooter = `

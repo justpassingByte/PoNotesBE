@@ -10,6 +10,7 @@ interface TendencyScore {
 
 import { PokerNoteParser } from './PokerNoteParser';
 import { LoggerService, LogType } from '../loggerService';
+import { PatternEngine } from './PatternEngine';
 
 export class ProfileAggregator {
     /**
@@ -60,6 +61,10 @@ export class ProfileAggregator {
         console.log(`[PlayerProfiling] Raw Notes Processed: ${notes.length}`);
         console.log(`[PlayerProfiling] Structured Tendencies:`, JSON.stringify(structuredData, null, 2));
 
+        // 3.5 Fetch memory patterns
+        const activePatterns = await PatternEngine.getActivePatterns(playerId);
+        console.log(`[PlayerProfiling] Active Memory Patterns:`, JSON.stringify(activePatterns, null, 2));
+
         // 4. Call AI for Profiling
         console.log(`\n--- [PlayerProfiling] AI PROMPT SENT ---`);
         let profile = null;
@@ -75,7 +80,7 @@ export class ProfileAggregator {
                 }
             }
 
-            profile = await this.callAI(structuredData, playerId);
+            profile = await this.callAI(structuredData, playerId, activePatterns);
         } catch (aiErr) {
             // Bug #18 Fix: Graceful failure
             console.error(`[PlayerProfiling] ERROR calling AI:`, aiErr);
@@ -135,7 +140,7 @@ export class ProfileAggregator {
         return weight;
     }
 
-    private static async callAI(structuredData: any[], playerId: string) {
+    private static async callAI(structuredData: any[], playerId: string, activePatterns: any[] = []) {
         const groqKey = process.env.GROQ_API_KEY;
 
         try {
@@ -169,7 +174,13 @@ export class ProfileAggregator {
 
             const rawContent = notes.map(n => n.content).join('; ');
             const prompt = buildProfilePrompt(aiConfig?.system_prompt || undefined, aiConfig as any);
-            const inputText = `STRUCTURED TENDENCIES: ${JSON.stringify(structuredData, null, 2)}\n\nRAW CONTEXTUAL NOTES: ${rawContent}`;
+            
+            let inputText = `STRUCTURED TENDENCIES: ${JSON.stringify(structuredData, null, 2)}\n\nRAW CONTEXTUAL NOTES: ${rawContent}`;
+            if (activePatterns && activePatterns.length > 0) {
+                inputText = `### VERIFIED PLAYER PATTERNS:\n\n` + 
+                            activePatterns.map(p => `- ${p.pattern} (confidence: ${p.confidence}, ${p.occurrences} samples)`).join('\n') +
+                            `\n\nUse ONLY if relevant to build archetype.\n\n` + inputText;
+            }
 
             console.log(`[PlayerProfiling] SYSTEM PROMPT (User: ${player.user_id}):\n${prompt}`);
             console.log(`[PlayerProfiling] USER INPUT:\n${inputText}`);

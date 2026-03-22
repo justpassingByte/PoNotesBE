@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
 import axios from 'axios';
 import { LoggerService, LogType } from '../services/loggerService';
+import { prisma } from '../lib/prisma';
 
 const router = Router();
 
@@ -45,6 +46,30 @@ router.post(
                 { cardName, action, correctedName, imageHex: imageHex.slice(0, 16) + '...' },
                 handId
             );
+
+            // AUTO-LEARNING ENGINE FOR OCR (Fixed Race Condition with upsert)
+            if (action === 'edit') {
+                await prisma.template.upsert({
+                    where: { label_category: { label: correctedName, category: 'card_ocr' } },
+                    update: { weight: { increment: 1 } },
+                    create: { label: correctedName, category: 'card_ocr', weight: 1 }
+                });
+            } else if (action === 'confirm') {
+                await prisma.template.upsert({
+                    where: { label_category: { label: cardName, category: 'card_ocr' } },
+                    update: { weight: { increment: 1 } },
+                    create: { label: cardName, category: 'card_ocr', weight: 1 }
+                });
+            } else if (action === 'reject') {
+                try {
+                    await prisma.template.update({
+                        where: { label_category: { label: cardName, category: 'card_ocr' } },
+                        data: { weight: { decrement: 1 } }
+                    });
+                } catch (e: any) {
+                    // It's perfectly fine if we reject a non-existing template
+                }
+            }
 
             const response = await axios.post(`${OCR_SERVICE_URL}/feedback`, {
                 image_hex:      imageHex,

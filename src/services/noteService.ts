@@ -2,6 +2,7 @@ import { NoteRepository } from '../repositories/NoteRepository';
 import { createNoteSchema, updateNoteSchema } from '../validators/note.schema';
 import { AIAnalysisService } from './AIAnalysisService';
 import { PlayerService } from './playerService';
+import { PatternEngine } from './analysis/PatternEngine';
 
 export class NoteService {
     private readonly aiService: AIAnalysisService;
@@ -42,6 +43,14 @@ export class NoteService {
             player_id: playerId
         } as any);
 
+        // Memory Intelligence: Learn new pattern
+        PatternEngine.processNote(note).catch(err => {
+            console.error(`[PatternEngine] Failed to process note:`, err);
+        });
+
+        // Async Profile Update
+        this.triggerAIAnalysis(playerId);
+
         return note;
     }
 
@@ -49,6 +58,14 @@ export class NoteService {
         if (!noteId) throw new Error('Note ID is required');
         const validatedData = updateNoteSchema.parse(payload);
         const note = await this.noteRepository.update(userId, noteId, validatedData);
+
+        // Memory Intelligence: Reinforce pattern on edit
+        PatternEngine.processNote(note).catch(err => {
+            console.error(`[PatternEngine] Failed to process note:`, err);
+        });
+
+        // Async Profile Update
+        this.triggerAIAnalysis(note.player_id);
 
         return note;
     }

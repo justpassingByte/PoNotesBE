@@ -41,45 +41,45 @@ enum UsageActionType {
 // ─── User & Account ─────────────────────────────────────────────────────────
 
 model User {
-  id                  String       @id @default(uuid())
-  email               String       @unique
-  password            String       @default("$2b$10$wzN27C5fWn8.fC/O8v.7.OWY4uNfF/0uO2O8O8O8O8O8O8O8O8O8O") // Default 'admin' hashed for seeding
-  premium_tier        PremiumTier  @default(FREE)
-  is_admin            Boolean      @default(false)
+  id                  String      @id @default(uuid())
+  email               String      @unique
+  password            String      @default("$2b$10$wzN27C5fWn8.fC/O8v.7.OWY4uNfF/0uO2O8O8O8O8O8O8O8O8O8O") // Default 'admin' hashed for seeding
+  premium_tier        PremiumTier @default(FREE)
+  is_admin            Boolean     @default(false)
   subscription_expiry DateTime?
-  max_devices         Int          @default(2)
-  created_at          DateTime     @default(now())
+  max_devices         Int         @default(2)
+  created_at          DateTime    @default(now())
 
-  sessions Session[]
-  usages   UserUsage[]
-  hands    Hand[]
-  invoices Invoice[]
-  players  Player[]    @relation("UserPlayers")
-  notes    Note[]      @relation("UserNotes")
+  sessions    Session[]
+  usages      UserUsage[]
+  hands       Hand[]
+  invoices    Invoice[]
+  players     Player[]      @relation("UserPlayers")
+  notes       Note[]        @relation("UserNotes")
   aiConfig    UserAIConfig?
   system_logs SystemLog[]
 }
 
 model UserAIConfig {
-  user_id           String  @id
-  system_prompt     String? @db.Text
-  exploit_prompt    String? @db.Text
-  analysis_prompt   String? @db.Text
-  model_name        String  @default("gpt-4o")
-  temperature       Float   @default(0.7)
-  is_enabled        Boolean @default(true)
-  updated_at        DateTime @updatedAt
+  user_id         String   @id
+  system_prompt   String?  @db.Text
+  exploit_prompt  String?  @db.Text
+  analysis_prompt String?  @db.Text
+  model_name      String   @default("gpt-4o")
+  temperature     Float    @default(0.7)
+  is_enabled      Boolean  @default(true)
+  updated_at      DateTime @updatedAt
 
   // NEW BEHAVIORAL FIELDS (Player Profiling)
-  ai_style          String  @default("Balanced")    // "GTO" | "Balanced" | "Exploit"
-  aggression_bias   Int     @default(50)           // 0 - 100
-  insight_depth     String  @default("Deep")       // "Quick" | "Deep"
-  behavior_toggles  Json?                          // JSON for specific switches
+  ai_style         String @default("Balanced") // "GTO" | "Balanced" | "Exploit"
+  aggression_bias  Int    @default(50) // 0 - 100
+  insight_depth    String @default("Deep") // "Quick" | "Deep"
+  behavior_toggles Json? // JSON for specific switches
 
   // NEW BEHAVIORAL FIELDS (Hand Analysis)
-  hand_style          String  @default("Balanced")
-  hand_aggression_bias Int     @default(50)
-  hand_insight_depth   String  @default("Deep")
+  hand_style            String @default("Balanced")
+  hand_aggression_bias  Int    @default(50)
+  hand_insight_depth    String @default("Deep")
   hand_behavior_toggles Json?
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -88,20 +88,20 @@ model UserAIConfig {
 // ─── Dynamic Pricing ─────────────────────────────────────────────────────────
 
 model PricingPlan {
-  id              String      @id // Connects to PremiumTier enum string (FREE, PRO, etc.)
-  name            String
-  price           Float
-  period          String      @default("/month")
-  description     String
-  features        String[]    // Array of feature descriptions
-  ai_limit        Int         @default(0) // AI Analysis per day
-  name_ocr_limit  Int         @default(0) // Name OCR per day
-  hand_ocr_limit  Int         @default(0) // Hand OCR per day
-  max_devices     Int         @default(1) // Max devices allowed
-  ocr_limit       Int         @default(0) // Fallback/Generic OCR limit
-  is_popular      Boolean     @default(false)
-  color_theme     String      @default("gold") // gold, purple, blue, emerald
-  updated_at      DateTime    @updatedAt
+  id             String   @id // Connects to PremiumTier enum string (FREE, PRO, etc.)
+  name           String
+  price          Float
+  period         String   @default("/month")
+  description    String
+  features       String[] // Array of feature descriptions
+  ai_limit       Int      @default(0) // AI Analysis per day
+  name_ocr_limit Int      @default(0) // Name OCR per day
+  hand_ocr_limit Int      @default(0) // Hand OCR per day
+  max_devices    Int      @default(1) // Max devices allowed
+  ocr_limit      Int      @default(0) // Fallback/Generic OCR limit
+  is_popular     Boolean  @default(false)
+  color_theme    String   @default("gold") // gold, purple, blue, emerald
+  updated_at     DateTime @updatedAt
 }
 
 model Session {
@@ -153,26 +153,44 @@ model Player {
   ai_aggression_score Int?
   ai_gto_baseline     String?
   ai_exploit_strategy String?
-  ai_stats_used       String?   // JSON array of stat names used
-  ai_analysis_mode    String?   // "simple" | "advanced"
-  ai_range_matrix     Json?     // 13x13 mathematical range logic
-  ai_action_breakdown Json?     // macro action %s (Raise, Call, Fold)
+  ai_stats_used       String? // JSON array of stat names used
+  ai_analysis_mode    String? // "simple" | "advanced"
+  ai_range_matrix     Json? // 13x13 mathematical range logic
+  ai_action_breakdown Json? // macro action %s (Raise, Call, Fold)
   ai_last_analyzed_at DateTime?
 
   // New: Aggregated AI profile from notes (tendencies, leaks, exploitStrategy)
-  ai_profile          Json?
+  ai_profile Json?
 
-  user              User             @relation("UserPlayers", fields: [user_id], references: [id], onDelete: Cascade)
-  platform          Platform         @relation(fields: [platform_id], references: [id])
+  user              User              @relation("UserPlayers", fields: [user_id], references: [id], onDelete: Cascade)
+  platform          Platform          @relation(fields: [platform_id], references: [id])
   notes             Note[]
   stats             PlayerStats?
   analysis_contexts AnalysisContext[]
+  patterns          PlayerPattern[]
 
   @@unique([user_id, platform_id, name])
   @@index([user_id])
   @@index([name])
   @@index([created_at])
   @@index([user_id, playstyle]) // Optimized for dashboard grouping
+}
+
+model PlayerPattern {
+  id          String   @id @default(uuid())
+  player_id   String
+  pattern     String
+  confidence  Float    @default(0.1) // Range: 0.0 to 1.0
+  occurrences Int      @default(1)
+  decay_score Float    @default(1.0)
+  last_seen   DateTime @default(now())
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  player Player @relation(fields: [player_id], references: [id], onDelete: Cascade)
+
+  @@unique([player_id, pattern])
+  @@index([player_id])
 }
 
 model Note {
@@ -183,9 +201,9 @@ model Note {
   note_type       String   @default("TEXT")
   content         String
   category        String   @default("GENERAL") // "EXPLOIT" | "LEAK" | "TELL" | "GENERAL"
-  source          String   @default("custom")  // "template" | "custom" | "ai"
+  source          String   @default("custom") // "template" | "custom" | "ai"
   is_ai_generated Boolean  @default(false)
-  hand_id         String?  // Optional link to analyzed hand
+  hand_id         String? // Optional link to analyzed hand
   created_at      DateTime @default(now())
 
   user   User   @relation("UserNotes", fields: [user_id], references: [id], onDelete: Cascade)
@@ -196,18 +214,18 @@ model Note {
 }
 
 model Hand {
-  id           String   @id @default(uuid())
-  user_id      String
-  hand_hash    String   @unique // Canonical hash for caching
-  raw_input    String   // Original text or image URL
-  input_type   String   @default("text") // "text" | "image"
-  parsed_data  Json?    // Structured hand JSON (positions, actions, board)
-  ai_analysis  Json?    // AI output: heroMistakes, villainMistakes, betterLine, exploit
-  tags         String[] @default([])
-  created_at   DateTime @default(now())
+  id          String   @id @default(uuid())
+  user_id     String
+  hand_hash   String   @unique // Canonical hash for caching
+  raw_input   String // Original text or image URL
+  input_type  String   @default("text") // "text" | "image"
+  parsed_data Json? // Structured hand JSON (positions, actions, board)
+  ai_analysis Json? // AI output: heroMistakes, villainMistakes, betterLine, exploit
+  tags        String[] @default([])
+  created_at  DateTime @default(now())
 
-  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  notes Note[]
+  user        User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  notes       Note[]
   system_logs SystemLog[]
 
   @@index([user_id])
@@ -218,6 +236,8 @@ model Template {
   label    String
   category String
   weight   Int    @default(0)
+
+  @@unique([label, category])
 }
 
 model PlayerStats {
@@ -246,9 +266,9 @@ model AppSettings {
 model AnalysisContext {
   id            String   @id @default(uuid())
   player_id     String
-  position      String   // "IP" | "OOP"
-  hero_stack    Float    // hero stack in BB
-  villain_stack Float    // villain stack in BB
+  position      String // "IP" | "OOP"
+  hero_stack    Float // hero stack in BB
+  villain_stack Float // villain stack in BB
   created_at    DateTime @default(now())
 
   player Player @relation(fields: [player_id], references: [id])
@@ -261,8 +281,8 @@ model Invoice {
   user_id         String
   nowpayments_id  String?       @unique // External invoice ID from provider
   payment_id      String?       @unique // External blockchain payment ID
-  amount          Float         // The base price in USD
-  actually_paid   Float?        // Total USD equivalent received
+  amount          Float // The base price in USD
+  actually_paid   Float? // Total USD equivalent received
   currency        String        @default("USD")
   status          InvoiceStatus @default(PENDING)
   tier_requested  PremiumTier
@@ -278,28 +298,28 @@ model Invoice {
 model PaymentEvent {
   id              String   @id @default(uuid())
   invoice_id      String
-  event_type      String   // Webhook, State Transition, Error
-  payload         Json     // Masked JSON payload
+  event_type      String // Webhook, State Transition, Error
+  payload         Json // Masked JSON payload
   signature_valid Boolean?
   processed       Boolean  @default(false)
   created_at      DateTime @default(now())
 
   invoice Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
 }
-model SystemLog {
-  id          String   @id @default(uuid())
-  user_id     String
-  hand_id     String?
-  event_type  String   // "OCR_FEEDBACK" | "AI_LEARNING" | "PROFILE_EVOLUTION" | "SYSTEM"
-  message     String
-  metadata    Json?    // Contextual data like old_val, new_val
-  created_at  DateTime @default(now())
 
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+model SystemLog {
+  id         String   @id @default(uuid())
+  user_id    String
+  hand_id    String?
+  event_type String // "OCR_FEEDBACK" | "AI_LEARNING" | "PROFILE_EVOLUTION" | "SYSTEM"
+  message    String
+  metadata   Json? // Contextual data like old_val, new_val
+  created_at DateTime @default(now())
+
+  user User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
   hand Hand? @relation(fields: [hand_id], references: [id], onDelete: SetNull)
 
   @@index([user_id])
   @@index([hand_id])
   @@index([created_at])
 }
-

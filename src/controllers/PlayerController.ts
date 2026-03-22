@@ -167,6 +167,11 @@ export class PlayerController {
                 const newProfile = await ProfileAggregator.generateProfile(player.id);
                 if (newProfile) {
                     await UsageService.incrementUsage(userId, UsageActionType.AI_ANALYZE, tier);
+                    
+                    // Invalidate caches so other screens see the new AI profile immediately
+                    clearPlayerCache(userId);
+                    clearDashboardCache(userId);
+                    
                     // Refresh usage info after increment
                     usage = await UsageService.checkQuota(userId, UsageActionType.AI_ANALYZE, tier);
                     player = { ...player, ai_profile: newProfile as any };
@@ -204,6 +209,10 @@ export class PlayerController {
             if (profile) {
                 await UsageService.incrementUsage(userId, UsageActionType.AI_ANALYZE, tier);
             }
+            
+            // Invalidate cache so Dashboard and PlayerList get the new AI Profile!
+            clearPlayerCache(userId);
+            clearDashboardCache(userId);
             
             const updatedUsage = await UsageService.checkQuota(userId, UsageActionType.AI_ANALYZE, tier);
             res.json({ 
