@@ -121,7 +121,11 @@ export class NowPaymentsService {
         if (!payload || !signature || !ipnSecret) return false;
 
         const crypto = require('crypto');
-        const sortedPayload = this.sortObject(payload);
+        
+        // If it's a Buffer, parse it first so we can sort the keys correctly
+        const normalizedPayload = Buffer.isBuffer(payload) ? JSON.parse(payload.toString()) : payload;
+        
+        const sortedPayload = this.sortObject(normalizedPayload);
         const canonString = JSON.stringify(sortedPayload);
         
         const hmac = crypto.createHmac('sha512', ipnSecret);

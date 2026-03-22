@@ -128,11 +128,14 @@ export class PaymentService {
             
             const requiredMin = invoice.amount * this.AMOUNT_TOLERANCE;
 
-            // If reported paid amount is missing/0 but status is FINISHED, trust the price_amount
-            // This handles cases where NOWPayments omits the conversion field for certain coins/settlement times.
-            if (!actuallyPaidFiat && payment_status.toLowerCase() === 'finished') {
+            // If reported paid amount is missing or suspiciously low (crypto vs fiat mismatch) but status is FINISHED, trust the price_amount.
+            // This happens often when NOWPayments doesn't settle the fiat conversion in time for the IPN.
+            if ((!actuallyPaidFiat || actuallyPaidFiat < requiredMin) && payment_status.toLowerCase() === 'finished') {
+                console.log(`[PaymentService] Amount mismatch but status is FINISHED. Trusting price_amount: ${payload.price_amount}`);
                 actuallyPaidFiat = payload.price_amount;
             }
+
+            console.log(`[PaymentService] Final calculation: Paid ${actuallyPaidFiat} | Required ${requiredMin} | Status: ${newStatus}`);
 
             if (actuallyPaidFiat < requiredMin) {
                 // Short payment → manual review
