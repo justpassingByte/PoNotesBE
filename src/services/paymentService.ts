@@ -32,7 +32,9 @@ function mapStatus(nowpaymentsStatus: string): InvoiceStatus {
         case 'refunded':
             return InvoiceStatus.MANUAL_REVIEW;
         case 'failed':
+            return InvoiceStatus.FAILED;
         case 'expired':
+            return InvoiceStatus.EXPIRED;
         default:
             return InvoiceStatus.FAILED;
     }
@@ -46,7 +48,8 @@ function isForwardTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
     // FINISHED is immutable
     if (from === InvoiceStatus.FINISHED) return false;
     // MANUAL_REVIEW is semi-terminal: only FINISHED can follow
-    if (from === InvoiceStatus.MANUAL_REVIEW && to !== InvoiceStatus.FINISHED) return false;
+    if (from === InvoiceStatus.MANUAL_REVIEW) return to === InvoiceStatus.FINISHED;
+    // Standard progression
     return STATE_ORDER[to] > STATE_ORDER[from];
 }
 
@@ -118,8 +121,18 @@ export class PaymentService {
 
         // ─── 6. Strict amount + currency validation ───────────────────────────────
         if (newStatus === InvoiceStatus.FINISHED) {
-            const actuallyPaidFiat = payload.actually_paid_at_fiat ?? actually_paid;
+            // Priority: actually_paid_at_fiat (direct USD) 
+            // Fallback: actually_paid (if same currency)
+            // Safety: price_amount (what they intended to pay) if status is confirmed "finished"
+            let actuallyPaidFiat = payload.actually_paid_at_fiat ?? (payload.pay_currency === payload.price_currency ? actually_paid : 0);
+            
             const requiredMin = invoice.amount * this.AMOUNT_TOLERANCE;
+
+            // If reported paid amount is missing/0 but status is FINISHED, trust the price_amount
+            // This handles cases where NOWPayments omits the conversion field for certain coins/settlement times.
+            if (!actuallyPaidFiat && payment_status.toLowerCase() === 'finished') {
+                actuallyPaidFiat = payload.price_amount;
+            }
 
             if (actuallyPaidFiat < requiredMin) {
                 // Short payment → manual review

@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import { PaymentController } from '../controllers/PaymentController';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
+import { authMiddleware } from '../middleware/authMiddleware';
 
 const router = Router();
 const controller = new PaymentController();
@@ -51,6 +52,7 @@ const webhookLimiter = rateLimit({
  */
 router.post(
     '/create-invoice',
+    authMiddleware,
     createInvoiceLimiter,
     asyncErrorWrapper((req, res) => controller.createInvoice(req, res))
 );
@@ -72,6 +74,7 @@ router.post(
  */
 router.get(
     '/:id/status',
+    authMiddleware,
     asyncErrorWrapper((req, res) => controller.getStatus(req, res))
 );
 

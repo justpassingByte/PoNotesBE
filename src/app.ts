@@ -72,6 +72,9 @@ app.get('/health', (req, res) => {
 // Auth routes (Self-managed public/private)
 app.use('/api/auth', authRoutes);
 
+// Payment routes (Self-managed: webhook is public, others are private)
+app.use('/api/payments', paymentRoutes);
+
 // Public Pricing Route (Keep this ABOVE authMiddleware)
 app.get('/api/admin/pricing/public', async (req, res, next) => {
     try {
@@ -101,7 +104,6 @@ app.use('/api/solve', solverRoutes);
 app.use('/api/solver', solverRoutes); // Alias
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/hands', handRoutes);
-app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
