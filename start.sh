@@ -7,4 +7,4 @@ npx prisma migrate deploy
 
 # 2. Start the server
 echo "🌟 Starting backend server..."
-node dist/server.js
+node dist/src/server.js

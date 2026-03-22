@@ -7,29 +7,26 @@ import { UsageActionType, PremiumTier } from '@prisma/client';
  * -1 means unlimited (soft-capped at SOFT_CAP for Enterprise).
  */
 const USAGE_LIMITS: Record<UsageActionType, Record<PremiumTier, number>> = {
-    AI_ANALYZE: {
-        FREE: 2,        // 2/day
-        PRO: 100,       // 100/month
-        PRO_PLUS: 500,  // 500/month
-        ENTERPRISE: -1  // unlimited (soft cap 2000)
-    },
-    OCR_NAME: {
-        FREE: 5,        // 5/day
-        PRO: 100,       // 100/month
-        PRO_PLUS: 300,  // 300/month
-        ENTERPRISE: -1  // unlimited
-    },
-    OCR_HAND: {
-        FREE: 2,        // 2/day (same as AI_ANALYZE for free)
-        PRO: 100,       // 100/month
-        PRO_PLUS: 300,  // 300/month
-        ENTERPRISE: -1  // unlimited
-    }
+    AI_ANALYZE: { FREE: 2, PRO: 100, PRO_PLUS: 500, ENTERPRISE: -1 },
+    OCR_NAME: { FREE: 5, PRO: 100, PRO_PLUS: 300, ENTERPRISE: -1 },
+    OCR_HAND: { FREE: 2, PRO: 100, PRO_PLUS: 300, ENTERPRISE: -1 }
 };
 
 const ENTERPRISE_SOFT_CAP = 2000;
 
 export class UsageService {
+    private async getLimit(actionType: UsageActionType, tier: PremiumTier): Promise<number> {
+        try {
+            const plan = await (prisma as any).pricingPlan.findUnique({ where: { id: tier } });
+            if (plan) {
+                return actionType === 'AI_ANALYZE' ? plan.ai_limit : plan.ocr_limit;
+            }
+        } catch (e) {
+            console.warn(`[UsageService] Could not fetch dynamic limit for ${tier}, using fallback.`);
+        }
+        return USAGE_LIMITS[actionType][tier];
+    }
+
 
     /**
      * Get the start of the current billing period.
@@ -56,7 +53,7 @@ export class UsageService {
         resetsAt: Date;
     }> {
         const periodStart = this.getPeriodStart(tier);
-        const limit = USAGE_LIMITS[actionType][tier];
+        const limit = await this.getLimit(actionType, tier);
 
         // Get or create usage record
         const usage = await prisma.userUsage.findFirst({

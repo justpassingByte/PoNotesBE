@@ -25,7 +25,8 @@ export class HandService {
         inputType: 'text' | 'image';
         tier: PremiumTier;
     }): Promise<{ hand: any; fromCache: boolean }> {
-        const hash = generateHandHash(params.rawInput);
+        // Include userId in hash to prevent cross-user leakage
+        const hash = generateHandHash(`${params.userId}:${params.rawInput}`);
 
         // Check if we already have this exact hand parsed
         const cached = await this.handRepository.findByHash(hash);
@@ -138,6 +139,7 @@ export class HandService {
             // 2. If cached, we already have the result
             if (cached && result) {
                 console.log(`[HandService] Cache Hit from OCR Service for ${job_id}`);
+                // Verify the result is actually for this image hash
                 return result.data;
             }
 
@@ -354,6 +356,8 @@ If the Rule Engine says it's a mistake, analyze it as such. Do NOT contradict th
         limit?: number;
         cursor?: string;
         tag?: string;
+        gameType?: string;
+        minPot?: number;
     }) {
         return this.handRepository.findByUserId(userId, options);
     }

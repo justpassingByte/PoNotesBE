@@ -12,13 +12,29 @@ export class HandRepository {
     async findByUserId(userId: string, options?: {
         limit?: number;
         cursor?: string;
-        playerName?: string;
         tag?: string;
+        gameType?: string;
+        boardCards?: string[];
+        minPot?: number;
     }) {
         const where: Prisma.HandWhereInput = { user_id: userId };
 
         if (options?.tag) {
             where.tags = { has: options.tag };
+        }
+
+        if (options?.gameType) {
+            where.parsed_data = {
+                path: ['game_type'],
+                equals: options.gameType
+            } as any;
+        }
+
+        if (options?.minPot) {
+            where.parsed_data = {
+                path: ['pot'],
+                gte: options.minPot
+            } as any;
         }
 
         return prisma.hand.findMany({

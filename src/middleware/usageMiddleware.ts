@@ -22,14 +22,18 @@ export function checkUsageQuota(actionType: UsageActionType) {
             let userId: string;
             let user: { premium_tier: PremiumTier } | null = null;
 
-            if (rawUserId) {
-                // Real auth path: look up user by their ID
+            if ((req as any).user) {
+                // Real auth path: use user from authMiddleware
+                const authUser = (req as any).user;
+                userId = authUser.id;
+                user = { premium_tier: authUser.premium_tier };
+            } else if (rawUserId) {
+                // Support legacy userId in body/query for specialized tasks
                 user = await prisma.user.findUnique({
                     where: { id: rawUserId },
-                    select: { premium_tier: true }
+                    select: { id: true, premium_tier: true }
                 });
                 userId = rawUserId;
-
                 if (!user) {
                     res.status(404).json({ success: false, error: 'User not found' });
                     return;

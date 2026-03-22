@@ -84,7 +84,9 @@ export class HandController extends BaseController {
             const hands = await this.handService.getHistory(userId, {
                 limit: parseInt(req.query.limit as string) || 20,
                 cursor: req.query.cursor as string,
-                tag: req.query.tag as string
+                tag: req.query.tag as string,
+                gameType: req.query.gameType as string,
+                minPot: req.query.minPot ? parseInt(req.query.minPot as string) : undefined
             });
 
             this.handleSuccess(res, hands);

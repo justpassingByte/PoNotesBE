@@ -41,6 +41,7 @@ model User {
   email               String       @unique
   password            String       @default("$2b$10$wzN27C5fWn8.fC/O8v.7.OWY4uNfF/0uO2O8O8O8O8O8O8O8O8O8O") // Default 'admin' hashed for seeding
   premium_tier        PremiumTier  @default(FREE)
+  is_admin            Boolean      @default(false)
   subscription_expiry DateTime?
   max_devices         Int          @default(2)
   created_at          DateTime     @default(now())
@@ -51,6 +52,22 @@ model User {
   invoices Invoice[]
   players  Player[]    @relation("UserPlayers")
   notes    Note[]      @relation("UserNotes")
+}
+
+// ─── Dynamic Pricing ─────────────────────────────────────────────────────────
+
+model PricingPlan {
+  id          String      @id // Connects to PremiumTier enum string (FREE, PRO, etc.)
+  name        String
+  price       Float
+  period      String      @default("/month")
+  description String
+  features    String[]    // Array of feature descriptions
+  ai_limit    Int         // Limit per period (-1 for unlimited)
+  ocr_limit   Int         // Limit per period (-1 for unlimited)
+  is_popular  Boolean     @default(false)
+  color_theme String      @default("gold") // gold, purple, blue, emerald
+  updated_at  DateTime    @updatedAt
 }
 
 model Session {
