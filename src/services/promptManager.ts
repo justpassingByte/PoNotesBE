@@ -264,9 +264,10 @@ ${configBlock}
   "confidence": 0.0-1.0,
   "aggression_score": 0-100,
   "looseness_score": 0-100,
-  "leaks": ["Specific leaks (max 3)"],
-  "strategy": "MANDATORY: 2-3 short, tactical bullet points (max 20 words each). Use format: '• Action (Freq%): Reason'. NO long paragraphs.",
-  "gto_deviation_reason": "Explanation of why this Line > GTO (if applicable)"
+  "leaks": ["Max 2 key leaks"],
+  "strategy": "Max 40 words strategy summary",
+  "range_adjustments": ["Actionable range tweaks (e.g. '3-bet 15%+', 'C-bet 1/3 pot only')", "Max 3 items"],
+  "gto_deviation_reason": "Strategy > GTO explanation"
 }
 
 ${systemFooter}`;
