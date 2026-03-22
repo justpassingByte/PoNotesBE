@@ -18,7 +18,7 @@ export class PlayerRepository {
         const args: any = {
             take: limit,
             where: { user_id: userId },
-            orderBy: { created_at: 'desc' },
+            orderBy: [{ created_at: 'desc' }, { id: 'asc' }],
             include: {
                 platform: true,
                 _count: { select: { notes: true } }

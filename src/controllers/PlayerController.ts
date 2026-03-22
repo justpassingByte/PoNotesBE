@@ -12,9 +12,11 @@ export class PlayerController {
             const limit = parseInt(req.query.limit as string) || 10;
             const cursor = req.query.cursor as string;
             const query = req.query.query as string;
+            const playstyle = req.query.playstyle as string;
+            const platform = req.query.platform as string;
             const userId = (req as any).user.id;
             
-            const cacheKey = `players_list_${userId}_l${limit}_c${cursor || 'none'}_q${query || 'none'}`;
+            const cacheKey = `players_list_${userId}_l${limit}_c${cursor || 'none'}_q${query || 'none'}_s${playstyle || 'all'}_p${platform || 'all'}`;
             
             // 1. Try cache
             const cached = playerCache.get(cacheKey);
@@ -25,6 +27,12 @@ export class PlayerController {
             const where: any = { user_id: userId };
             if (query) {
                 where.name = { contains: query, mode: 'insensitive' };
+            }
+            if (playstyle && playstyle !== 'All') {
+                where.playstyle = playstyle;
+            }
+            if (platform && platform !== 'All') {
+                where.platform = { name: platform };
             }
 
             // 2. Fetch ALL data in PARALLEL if not cached
@@ -38,20 +46,23 @@ export class PlayerController {
                         platform: true,
                         _count: { select: { notes: true } }
                     },
-                    orderBy: { created_at: 'desc' }
+                    orderBy: [
+                        { created_at: 'desc' },
+                        { id: 'asc' }
+                    ]
                 }),
-                prisma.player.count({ where }),
+                prisma.player.count({ where: { user_id: userId } }),
                 prisma.note.count({ where: { user_id: userId } }),
                 prisma.player.groupBy({
                     by: ['playstyle'],
                     where: { user_id: userId },
-                    _count: true
+                    _count: { _all: true }
                 })
             ]);
 
             const playstyleCounts: Record<string, number> = {};
             playstyles.forEach(p => {
-                if (p.playstyle) playstyleCounts[p.playstyle] = p._count;
+                if (p.playstyle) playstyleCounts[p.playstyle] = p._count._all;
             });
 
             const nextCursor = players.length === limit ? players[players.length - 1].id : null;
