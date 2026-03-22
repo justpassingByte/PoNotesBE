@@ -99,7 +99,21 @@ export class NowPaymentsService {
      * Fetch the current payment status for a given order ID.
      * Used for race condition retry logic and the status polling endpoint.
      */
-    async getPaymentStatus(paymentId: string): Promise<{ payment_status: string; actually_paid: number }> {
+    /**
+     * Fetch the current status of a HOSTED INVOICE created via /invoice.
+     * Returns the full invoice object including 'status' and 'payment_id' if available.
+     */
+    async getInvoiceStatus(invoiceId: string): Promise<any> {
+        return this.withRetry(() =>
+            this.client.get(`/invoice/${invoiceId}`).then(r => r.data)
+        );
+    }
+
+    /**
+     * Fetch the current payment status for a given payment ID.
+     * Use this ONLY if you have a payment_id from a webhook or transaction.
+     */
+    async getPaymentStatus(paymentId: string): Promise<any> {
         return this.withRetry(() =>
             this.client.get(`/payment/${paymentId}`).then(r => r.data)
         );
