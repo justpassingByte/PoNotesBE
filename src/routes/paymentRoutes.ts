@@ -14,7 +14,8 @@ const createInvoiceLimiter = rateLimit({
     max: 5,
     keyGenerator: (req: Request) => {
         const user = (req as any).user;
-        return user?.id || req.ip || 'unknown';
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        return user?.id || ip?.toString() || 'unknown';
     },
     handler: (_req: Request, res: Response) => {
         res.status(429).json({
