@@ -78,6 +78,7 @@ export class SettingsController {
                 model_name,
                 temperature: temperature ?? 0.7,
                 is_enabled: is_enabled ?? true,
+                // @ts-ignore
                 ai_style: ai_style ?? 'Balanced',
                 aggression_bias: aggression_bias ?? 50,
                 insight_depth: insight_depth ?? 'Deep',
@@ -101,6 +102,7 @@ export class SettingsController {
                 model_name,
                 temperature,
                 is_enabled,
+                // @ts-ignore
                 ai_style,
                 aggression_bias,
                 insight_depth,

@@ -144,7 +144,7 @@ export class PlayerController {
                     platform_id: platformId as string, 
                     name: name as string 
                 },
-                include: { notes: { where: { user_id: userId } }, stats: true }
+                include: { notes: { where: { user_id: userId } }, stats: true, platform: true }
             });
 
             if (!player) {
