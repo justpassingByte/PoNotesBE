@@ -22,6 +22,52 @@ async function main() {
         }
     });
     console.log('Created/Updated admin user.');
+    
+    // 0.1 Create Pricing Plans
+    const plans = [
+        {
+            id: "FREE",
+            name: "Trial",
+            price: 0,
+            description: "Standard access for casual players wanting to see what AI can do.",
+            features: ["2 AI Analysis / Day", "5 Name OCR / Day", "2 Full Hand OCR / Day", "Basic Player Profiles"],
+            ai_limit: 2,
+            ocr_limit: 2,
+            is_popular: false,
+            color_theme: "blue"
+        },
+        {
+            id: "PRO",
+            name: "Pro",
+            price: 29,
+            description: "For serious grinders playing multiple sessions per week.",
+            features: ["100 AI Analysis / Month", "100 Full OCR / Month", "Advanced Leak Detection", "Exploit Strategy"],
+            ai_limit: 100,
+            ocr_limit: 100,
+            is_popular: true,
+            color_theme: "gold"
+        },
+        {
+            id: "PRO_PLUS",
+            name: "Elite",
+            price: 59,
+            description: "Unleash the full power of Claude 3.5 Sonnet logic.",
+            features: ["500 AI Analysis / Month", "300 Full OCR / Month", "GTO Baseline Comparison", "VGG OCR"],
+            ai_limit: 500,
+            ocr_limit: 300,
+            is_popular: false,
+            color_theme: "purple"
+        }
+    ];
+
+    for (const plan of plans) {
+        await (prisma as any).pricingPlan.upsert({
+            where: { id: plan.id },
+            update: plan,
+            create: plan
+        });
+    }
+    console.log('Created/Updated pricing plans.');
 
     // 1. Create Platforms
     const wptPlatform = await prisma.platform.upsert({
