@@ -24,15 +24,22 @@ import { authMiddleware } from './middleware/authMiddleware';
 
 const app = express();
 
-// CORS
-const allowedOrigins = [
-    'http://localhost:3000',
-    'https://po-notes-fe.vercel.app',
-    process.env.FRONTEND_URL
-].filter(Boolean);
-
+// CORS configuration
 app.use(cors({
-    origin: allowedOrigins as string[],
+    origin: (origin, callback) => {
+        const allowedOrigins = [
+            'http://localhost:3000',
+            'https://po-notes-fe.vercel.app',
+            process.env.FRONTEND_URL
+        ].filter(Boolean);
+
+        // Allow if it's in the list OR if it's a Vercel subdomain
+        if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true
 }));
