@@ -1,0 +1,11 @@
+fastapi==0.110.0
+uvicorn==0.27.1
+paddlepaddle>=2.6.0
+paddleocr==2.7.3
+opencv-python-headless==4.9.0.80
+numpy==1.26.4
+Pillow==10.2.0
+celery==5.3.6
+redis==5.0.1
+python-multipart==0.0.9
+requests==2.31.0

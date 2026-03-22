@@ -1,0 +1,81 @@
+{
+  "layouts": [
+    {
+      "name": "GG_POKER_DESKTOP",
+      "site": "ggpoker",
+      "variant": "desktop",
+      "anchor_file": "gg_pot_icon.png",
+      "anchor_text": "total pot",
+      "aspect_ratio": 1.77,
+      "threshold": 0.5,
+      "regions": {
+        "pot_area": { "x1": 0.3, "y1": 0.1, "x2": 0.7, "y2": 0.25 },
+        "board_cards": { "x1": 0.25, "y1": 0.35, "x2": 0.75, "y2": 0.55 },
+        "action_log": { "x1": 0.05, "y1": 0.6, "x2": 0.45, "y2": 0.95 },
+        "hero_cards": { "x1": 0.38, "y1": 0.72, "x2": 0.63, "y2": 0.88 },
+        "showdown_area": { "x1": 0.1, "y1": 0.3, "x2": 0.9, "y2": 0.7 },
+        "player_seats": [
+          { "seat": 1, "angle": 270, "x": 0.5, "y": 0.8 },
+          { "seat": 2, "angle": 330, "x": 0.1, "y": 0.5 },
+          { "seat": 3, "angle": 30,  "x": 0.1, "y": 0.2 },
+          { "seat": 4, "angle": 90,  "x": 0.5, "y": 0.1 },
+          { "seat": 5, "angle": 150, "x": 0.9, "y": 0.2 },
+          { "seat": 6, "angle": 210, "x": 0.9, "y": 0.5 }
+        ]
+      }
+    },
+    {
+      "name": "GG_POKER_MOBILE",
+      "site": "ggpoker",
+      "variant": "mobile",
+      "anchor_file": "gg_pot_icon_mobile.png",
+      "anchor_text": "total pot",
+      "aspect_ratio": 0.46,
+      "threshold": 0.5,
+      "regions": {
+        "pot_area": { "x1": 0.2, "y1": 0.25, "x2": 0.8, "y2": 0.38 },
+        "board_cards": { "x1": 0.05, "y1": 0.38, "x2": 0.95, "y2": 0.55 },
+        "action_log": { "x1": 0.0, "y1": 0.65, "x2": 1.0, "y2": 1.0 },
+        "hero_cards": { "x1": 0.3, "y1": 0.78, "x2": 0.7, "y2": 0.93 },
+        "showdown_area": { "x1": 0.05, "y1": 0.38, "x2": 0.95, "y2": 0.65 },
+        "player_seats": [
+          { "seat": 1, "angle": 270, "x": 0.5,  "y": 0.75 },
+          { "seat": 2, "angle": 330, "x": 0.05, "y": 0.5 },
+          { "seat": 3, "angle": 30,  "x": 0.05, "y": 0.2 },
+          { "seat": 4, "angle": 90,  "x": 0.5,  "y": 0.05 },
+          { "seat": 5, "angle": 150, "x": 0.95, "y": 0.2 },
+          { "seat": 6, "angle": 210, "x": 0.95, "y": 0.5 }
+        ]
+      }
+    },
+    {
+      "name": "WPT_GLOBAL_DESKTOP",
+      "site": "wpt_global",
+      "variant": "desktop",
+      "anchor_file": "wpt_pot_label.png",
+      "anchor_text": "pot",
+      "aspect_ratio": 1.77,
+      "threshold": 0.4,
+      "regions": {
+        "pot_area": { "x1": 0.3, "y1": 0.1, "x2": 0.6, "y2": 0.18 },
+        "board_cards": { "x1": 0.2, "y1": 0.18, "x2": 0.55, "y2": 0.32 },
+        "action_log": { "x1": 0.0, "y1": 0.55, "x2": 0.72, "y2": 1.0 },
+        "sidebar": { "x1": 0.72, "y1": 0.0, "x2": 1.0, "y2": 1.0 },
+        "hero_cards": { "x1": 0.3, "y1": 0.34, "x2": 0.45, "y2": 0.45 },
+        "showdown_area": { "x1": 0.1, "y1": 0.15, "x2": 0.7, "y2": 0.45 },
+        "player_seats": [
+          { "seat": 1, "name": "Hero",         "x": 0.35, "y": 0.4 },
+          { "seat": 2, "name": "Bottom-Left",  "x": 0.15, "y": 0.35 },
+          { "seat": 3, "name": "Top-Left",     "x": 0.15, "y": 0.1 },
+          { "seat": 4, "name": "Top-Center",   "x": 0.38, "y": 0.05 },
+          { "seat": 5, "name": "Top-Right",    "x": 0.6,  "y": 0.1 },
+          { "seat": 6, "name": "Bottom-Right", "x": 0.55, "y": 0.35 }
+        ]
+      }
+    }
+  ],
+  "card_templates": {
+    "ranks": ["A","K","Q","J","T","9","8","7","6","5","4","3","2"],
+    "suits": ["d","c","h","s"]
+  }
+}
