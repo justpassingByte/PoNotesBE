@@ -90,4 +90,4 @@ app.use('/api/dashboard', dashboardRoutes);
 // Global Error Handler
 app.use(errorHandler);
 
-export { app };
+export default app;

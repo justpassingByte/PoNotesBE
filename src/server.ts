@@ -1,4 +1,4 @@
-import { app } from './app';
+import app from './app';
 import { config } from './config/unifiedConfig';
 import { invoiceExpiryWorker } from './core/invoiceExpiryWorker';
 
