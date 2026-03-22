@@ -24,8 +24,11 @@ enum PremiumTier {
 
 enum InvoiceStatus {
   PENDING
+  CONFIRMING
   FINISHED
   FAILED
+  EXPIRED
+  MANUAL_REVIEW
 }
 
 enum UsageActionType {
@@ -223,15 +226,32 @@ model AnalysisContext {
 // ─── Payments ────────────────────────────────────────────────────────────────
 
 model Invoice {
-  id             String        @id @default(uuid())
-  user_id        String
-  nowpayments_id String?       @unique // External payment provider ID
-  amount         Float
-  currency       String        @default("USD")
-  status         InvoiceStatus @default(PENDING)
-  tier_requested PremiumTier
-  created_at     DateTime      @default(now())
-  updated_at     DateTime      @updatedAt
+  id              String        @id @default(uuid())
+  user_id         String
+  nowpayments_id  String?       @unique // External invoice ID from provider
+  payment_id      String?       @unique // External blockchain payment ID
+  amount          Float         // The base price in USD
+  actually_paid   Float?        // Total USD equivalent received
+  currency        String        @default("USD")
+  status          InvoiceStatus @default(PENDING)
+  tier_requested  PremiumTier
+  is_upgraded     Boolean       @default(false)
+  last_webhook_at DateTime?
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
 
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user   User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  events PaymentEvent[]
+}
+
+model PaymentEvent {
+  id              String   @id @default(uuid())
+  invoice_id      String
+  event_type      String   // Webhook, State Transition, Error
+  payload         Json     // Masked JSON payload
+  signature_valid Boolean?
+  processed       Boolean  @default(false)
+  created_at      DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
 }
