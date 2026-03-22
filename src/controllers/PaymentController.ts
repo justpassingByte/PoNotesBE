@@ -85,12 +85,15 @@ export class PaymentController extends BaseController {
                 }, 201);
             }
 
+            const frontendUrl = config.frontend.url;
+            const success_url = `${frontendUrl}/payment/status/${invoice.id}`;
+
             const externalInvoice = await nowPaymentsService.createInvoice({
                 price_amount: priceAmount,
                 price_currency: 'usd',
                 order_id: invoice.id,
                 order_description: `VillainVault ${tierRequested} Plan — 30 days`,
-                success_url: config.nowpayments.successUrl,
+                success_url: success_url,
                 cancel_url: config.nowpayments.cancelUrl,
                 is_fixed_rate: false,
                 is_fee_paid_by_user: true, // User pays gas/network fees
@@ -162,11 +165,14 @@ export class PaymentController extends BaseController {
                 return respond();
             }
 
-            signatureValid = NowPaymentsService.verifySignature(req.body, signature, ipnSecret);
+            // Prefer raw body for HMAC verification to avoid JSON stringification issues
+            const verifyPayload = (req as any).rawBody || req.body;
+            signatureValid = NowPaymentsService.verifySignature(verifyPayload, signature, ipnSecret);
 
             if (!signatureValid) {
                 console.error('[Webhook] Invalid HMAC signature — request rejected');
-                // Still return 200 so NOWPayments doesn't block on bad requests
+                // Log the failure details for debugging (without sensitive info)
+                console.log(`[Webhook] Signature: ${signature.substring(0, 10)}... | Secret set: ${!!ipnSecret}`);
                 return respond();
             }
 
