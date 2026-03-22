@@ -236,7 +236,6 @@ export class PaymentController extends BaseController {
                     updated_at: true,
                 }
             });
-
             if (!invoice) {
                 return res.status(404).json({ success: false, error: 'Invoice not found' });
             }
@@ -246,18 +245,61 @@ export class PaymentController extends BaseController {
                 return res.status(403).json({ success: false, error: 'Forbidden' });
             }
 
+            // ─── 4.1. Self-healing / Sync check ──────────────────────────────────
+            // If still pending/confirming, manually check with NOWPayments API to overcome potential webhook delays/failures.
+            let currentStatus = invoice.status;
+            let currentIsUpgraded = invoice.is_upgraded;
+            let currentActuallyPaid = invoice.actually_paid;
+
+            if (invoice.status === 'PENDING' || invoice.status === 'CONFIRMING') {
+                if (invoice.nowpayments_id) {
+                    try {
+                        const externalStatus = await nowPaymentsService.getPaymentStatus(invoice.nowpayments_id);
+                        
+                        // If external status is more advanced, trigger a sync
+                        // We construct a mock webhook payload to reuse existing robust logic
+                        if (externalStatus.payment_status && externalStatus.payment_status.toLowerCase() !== invoice.status.toLowerCase()) {
+                            console.log(`[Sync] Triggering manual sync for ${invoice.id} — Remote status: ${externalStatus.payment_status}`);
+                            
+                            await paymentService.processWebhook({
+                                payment_id: invoice.nowpayments_id,
+                                payment_status: externalStatus.payment_status,
+                                price_amount: invoice.amount,
+                                price_currency: 'usd',
+                                pay_currency: 'unknown', // not critical for this sync
+                                actually_paid: externalStatus.actually_paid || 0,
+                                order_id: invoice.id,
+                            }, true);
+
+                            // Re-fetch invoice after potential update
+                            const updated = await prisma.invoice.findUnique({
+                                where: { id },
+                                select: { status: true, is_upgraded: true, actually_paid: true }
+                            });
+                            if (updated) {
+                                currentStatus = updated.status;
+                                currentIsUpgraded = updated.is_upgraded;
+                                currentActuallyPaid = updated.actually_paid;
+                            }
+                        }
+                    } catch (syncErr) {
+                        console.error(`[Sync] Failed to sync status for ${invoice.id}:`, syncErr);
+                    }
+                }
+            }
+
             // ─── 5. Return sanitized status (no sensitive internal IDs) ──────────
             return this.handleSuccess(res, {
                 id: invoice.id,
-                status: invoice.status,
+                status: currentStatus,
                 tier: invoice.tier_requested,
                 amount: invoice.amount,
-                actually_paid: invoice.actually_paid,
-                is_upgraded: invoice.is_upgraded,
+                actually_paid: currentActuallyPaid,
+                is_upgraded: currentIsUpgraded,
                 last_webhook_at: invoice.last_webhook_at,
                 created_at: invoice.created_at,
                 updated_at: invoice.updated_at,
-                ui_message: this.getUiMessage(invoice.status),
+                ui_message: this.getUiMessage(currentStatus),
             });
         } catch (error) {
             this.handleError(error, res, 'PaymentController.getStatus');
