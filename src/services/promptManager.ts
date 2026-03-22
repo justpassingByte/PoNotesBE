@@ -264,8 +264,8 @@ ${configBlock}
   "confidence": 0.0-1.0,
   "aggression_score": 0-100,
   "looseness_score": 0-100,
-  "leaks": ["Positional/Situational leaks"],
-  "strategy": "MANDATORY: Include Specific Sizing Suggestions and Frequency.",
+  "leaks": ["Specific leaks (max 3)"],
+  "strategy": "MANDATORY: 2-3 short, tactical bullet points (max 20 words each). Use format: '• Action (Freq%): Reason'. NO long paragraphs.",
   "gto_deviation_reason": "Explanation of why this Line > GTO (if applicable)"
 }
 
