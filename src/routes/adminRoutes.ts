@@ -13,7 +13,15 @@ const isAdmin = (req: any, res: any, next: any) => {
     }
 };
 
-// GET /api/admin/pricing - Get all plans
+// GET /api/admin/pricing - Get all plans (Public-ish, but registered under admin)
+router.get('/pricing/public', asyncErrorWrapper(async (req, res) => {
+    const plans = await (prisma as any).pricingPlan.findMany({
+        orderBy: { price: 'asc' }
+    });
+    res.json({ success: true, data: plans });
+}));
+
+// GET /api/admin/pricing - Get all plans (Admin only)
 router.get('/pricing', isAdmin, asyncErrorWrapper(async (req, res) => {
     const plans = await (prisma as any).pricingPlan.findMany({
         orderBy: { price: 'asc' }
@@ -161,6 +169,28 @@ router.get('/revenue-chart', isAdmin, asyncErrorWrapper(async (req, res) => {
     });
 
     res.json({ success: true, data: monthlyData });
+}));
+
+// POST /api/admin/users/update-subscription - Admin manually updates a user's plan
+router.post('/users/update-subscription', isAdmin, asyncErrorWrapper(async (req, res) => {
+    const { userId, tier, expiryDays } = req.body;
+
+    const updateData: any = {
+        premium_tier: tier,
+    };
+
+    if (expiryDays) {
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + parseInt(expiryDays));
+        updateData.subscription_expiry = expiryDate;
+    }
+
+    const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: updateData
+    });
+
+    res.json({ success: true, data: updatedUser });
 }));
 
 // POST /api/admin/promote-me - Promote current user to admin (temporary or if requested)
