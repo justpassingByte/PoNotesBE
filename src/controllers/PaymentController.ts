@@ -340,7 +340,7 @@ export class PaymentController extends BaseController {
             const plans = await (prisma as any).pricingPlan.findMany({ 
                 orderBy: { price: 'asc' } 
             });
-            this.handleSuccess(res, { success: true, data: plans });
+            this.handleSuccess(res, plans);
         } catch (error) {
             this.handleError(error, res, 'PaymentController.getPublicPlans');
         }
