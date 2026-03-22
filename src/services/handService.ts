@@ -159,7 +159,18 @@ export class HandService {
 
                 if (pollData.status === 'success') {
                     console.log(`[HandService] OCR Success for ${job_id} in ${currentRetry + 1}s`);
-                    return pollData.result.data;
+                    
+                    // Detailed log to debug "nothing returns" issue
+                    console.log("[OCR Result Raw]:", JSON.stringify(pollData.result, null, 2));
+
+                    // Defensive data extraction
+                    const resultData = pollData.result.data || pollData.result; // Use .data if exists, else the result itself
+                    
+                    if (!resultData || Object.keys(resultData).length === 0) {
+                        console.warn(`[HandService] Warning: OCR result for ${job_id} is empty!`);
+                    }
+
+                    return resultData;
                 }
 
                 if (pollData.status === 'error') {

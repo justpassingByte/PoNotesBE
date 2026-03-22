@@ -329,6 +329,7 @@ export class PaymentController extends BaseController {
                 amount: invoice.amount,
                 actually_paid: currentActuallyPaid,
                 is_upgraded: currentIsUpgraded,
+                is_admin: user.is_admin, // Let frontend know if they can see admin tools
                 last_webhook_at: invoice.last_webhook_at,
                 created_at: invoice.created_at,
                 updated_at: invoice.updated_at,
@@ -336,6 +337,42 @@ export class PaymentController extends BaseController {
             });
         } catch (error) {
             this.handleError(error, res, 'PaymentController.getStatus');
+        }
+    }
+
+    /**
+     * POST /api/payments/:id/simulate-success
+     * Admin only: Manually trigger a successful payment state for testing.
+     */
+    async simulateSuccess(req: Request, res: Response) {
+        try {
+            const user = (req as any).user;
+            const { id } = req.params;
+
+            if (!user.is_admin) {
+                return res.status(403).json({ success: false, error: 'Admin only' });
+            }
+
+            const invoice = await prisma.invoice.findUnique({ where: { id: id as string } });
+            if (!invoice) {
+                return res.status(404).json({ success: false, error: 'Invoice not found' });
+            }
+
+            console.log(`[Admin] Simulating success for invoice ${id}`);
+
+            await paymentService.processWebhook({
+                payment_id: `SIMULATED_${Date.now()}`,
+                payment_status: 'FINISHED',
+                price_amount: invoice.amount,
+                price_currency: 'usd',
+                pay_currency: 'BTC',
+                actually_paid: invoice.amount,
+                order_id: invoice.id,
+            }, true);
+
+            return this.handleSuccess(res, { message: 'Invoiced simulates as FINISHED' });
+        } catch (error) {
+            this.handleError(error, res, 'PaymentController.simulateSuccess');
         }
     }
 

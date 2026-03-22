@@ -87,4 +87,10 @@ router.get(
     asyncErrorWrapper((req, res) => controller.getStatus(req, res))
 );
 
+router.post(
+    '/:id/simulate-success',
+    authMiddleware,
+    asyncErrorWrapper((req, res) => controller.simulateSuccess(req, res))
+);
+
 export const paymentRoutes = router;
