@@ -33,6 +33,22 @@ export class AuthService {
     }
 
     /**
+     * Generate a new JWT for a session
+     */
+    static generateToken(user: any, session: any) {
+        return jwt.sign(
+            { 
+                userId: user.id, 
+                sessionId: session.id,
+                email: user.email,
+                tier: user.premium_tier 
+            }, 
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+    }
+
+    /**
      * Authenticate user and create a session
      */
     static async login(email: string, password: string, device_id: string = 'web-default') {
@@ -61,15 +77,13 @@ export class AuthService {
             throw new Error('Invalid credentials');
         }
 
-        // Check device limit (optional but user asked for it in metadata)
+        // Check device limit
         if (user.sessions.length >= user.max_devices) {
-            // Option 1: Reject login
-            // Option 2: Remove oldest session (let's do Option 2 for better UX)
             const oldestSession = user.sessions.sort((a, b) => a.created_at.getTime() - b.created_at.getTime())[0];
             await prisma.session.delete({ where: { id: oldestSession.id } });
         }
 
-        // Create new session
+        // Create new session or update existing device's session
         const session = await prisma.session.upsert({
             where: {
                 user_id_device_id: {
@@ -86,17 +100,8 @@ export class AuthService {
             }
         });
 
-        // Sign JWT with sessionId
-        const token = jwt.sign(
-            { 
-                userId: user.id, 
-                sessionId: session.id,
-                email: user.email,
-                tier: user.premium_tier 
-            }, 
-            JWT_SECRET,
-            { expiresIn: '7d' }
-        );
+        // Sign JWT
+        const token = this.generateToken(user, session);
 
         return { token, user: { id: user.id, email: user.email, tier: user.premium_tier } };
     }
@@ -131,6 +136,21 @@ export class AuthService {
         });
 
         return session.user;
+    }
+
+    /**
+     * Issues a fresh token for a valid session (e.g. after payment)
+     */
+    static async refreshTokenForSession(sessionId: string) {
+        const session = await prisma.session.findUnique({
+            where: { id: sessionId },
+            include: { user: true }
+        });
+
+        if (!session) throw new Error('Session not found');
+
+        const token = this.generateToken(session.user, session);
+        return { token, user: { id: session.user.id, email: session.user.email, tier: session.user.premium_tier } };
     }
 
     /**

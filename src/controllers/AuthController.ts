@@ -76,6 +76,34 @@ export class AuthController {
     }
 
     /**
+     * POST /api/auth/refresh-session
+     * Use case: Update premium status after payment without logout.
+     */
+    async refreshSession(req: Request, res: Response) {
+        try {
+            const sessionId = (req as any).sessionId;
+            if (!sessionId) {
+                return res.status(401).json({ success: false, error: 'No active session' });
+            }
+
+            const { token, user } = await AuthService.refreshTokenForSession(sessionId);
+
+            res.cookie('token', token, {
+                httpOnly: true,
+                secure: process.env.NEXT_PUBLIC_API_URL?.startsWith('https') || process.env.NODE_ENV === 'production',
+                maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+                sameSite: 'lax',
+                path: '/'
+            });
+
+            res.json({ success: true, token, user });
+        } catch (error: any) {
+            console.error('[AuthController] Refresh Error:', error.message);
+            res.status(500).json({ success: false, error: 'Session refresh failed' });
+        }
+    }
+
+    /**
      * GET /api/auth/me
      */
     async me(req: Request, res: Response) {

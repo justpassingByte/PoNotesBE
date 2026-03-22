@@ -46,11 +46,16 @@ export class PaymentController extends BaseController {
             }
             const { tierRequested } = parseResult.data;
 
-            // ─── 3. Get price from backend (not client-supplied) ─────────────────
-            const priceAmount = PLAN_PRICING[tierRequested];
-            if (!priceAmount) {
-                return res.status(400).json({ success: false, error: `Unknown tier: ${tierRequested}` });
+            // ─── 3. Get price from database (not hardcoded) ─────────────────
+            const plan = await (prisma as any).pricingPlan.findUnique({
+                where: { id: tierRequested }
+            });
+
+            if (!plan || plan.price <= 0) {
+                return res.status(400).json({ success: false, error: `Invalid or unavailable tier: ${tierRequested}` });
             }
+
+            const priceAmount = plan.price;
 
             // ─── 4. Create internal invoice first (optimistic) ───────────────────
             const invoice = await prisma.invoice.create({
@@ -58,7 +63,7 @@ export class PaymentController extends BaseController {
                     user_id: user.id,
                     amount: priceAmount,
                     currency: 'USD',
-                    tier_requested: tierRequested,
+                    tier_requested: tierRequested as any,
                     status: 'PENDING',
                 }
             });
