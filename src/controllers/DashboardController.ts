@@ -105,7 +105,8 @@ export class DashboardController {
                 platform: p.platform ? { id: p.platform.id, name: p.platform.name } : undefined,
                 ai_playstyle: p.ai_playstyle,
                 ai_aggression_score: p.ai_aggression_score,
-                ai_exploit_strategy: p.ai_exploit_strategy
+                ai_exploit_strategy: p.ai_exploit_strategy,
+                ai_profile: p.ai_profile
             });
 
             const [aiUsage, ocrUsage] = await Promise.all([

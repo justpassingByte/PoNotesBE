@@ -58,8 +58,9 @@ async def submit_ocr(file: UploadFile = File(...)):
 
     # 2. SHA256 Caching Layer
     image_hash = hashlib.sha256(content).hexdigest()
+    # OCR Cache Disabled per user request (Self-learning engine requirement)
+    '''
     cached_result = cache.get(f"hash:{image_hash}")
-
     if cached_result:
         return {
             "status": "success",
@@ -67,6 +68,7 @@ async def submit_ocr(file: UploadFile = File(...)):
             "cached": True,
             "result": json.loads(cached_result)
         }
+    '''
 
     # 3. Queue Task to Celery
     job = celery_app.send_task("tasks.process_hand", args=[content.hex(), image_hash])

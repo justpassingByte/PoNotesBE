@@ -268,7 +268,8 @@ def process_hand(image_hex: str, image_hash: str):
             }
         }
 
-        cache.set(f"hash:{image_hash}", json.dumps(final_result), ex=3600*24)
+        # OCR Output Caching Disabled (Self-learning engine requirement)
+        # cache.set(f"hash:{image_hash}", json.dumps(final_result), ex=3600*24)
         return final_result
 
     except Exception as e:

@@ -23,6 +23,11 @@ class HandProcessor:
         r'all-in': 'ALL-IN',
         r'tất tay': 'ALL-IN',
         r'tat tay': 'ALL-IN',
+        r'vòng 1': 'PREFLOP',
+        r'vòng 2': 'FLOP',
+        r'vòng 3': 'TURN',
+        r'vòng 4': 'RIVER',
+        r'vòng': 'STREET_MARKER',
         
         # UI Elements & Typos
         r'tổng pot': 'TOTAL_POT',
@@ -83,19 +88,25 @@ class HandProcessor:
         if detected_action == "UNKNOWN":
             return None # Not an action line or unknown
 
-        # 2. Extract Amount
-        amount_match = re.search(r'([\d.,]+)\s*(?:BB|8B|88)?$', line, re.IGNORECASE)
+        # 2. Extract Amount (MORE FLEXIBLE REGEX)
+        # Specifically look for numbers that follow an action keyword
+        action_patterns = '|'.join(HandProcessor.KEYWORD_MAP.keys())
+        # Search for the amount after any action keyword
+        amt_search = re.search(r'(?:' + action_patterns + r')\s*[:\-]?\s*(\d+[.,]\d+|\d+)', line, re.IGNORECASE)
+        
         amount = 0.0
-        if amount_match:
+        if amt_search:
             try:
-                amount_str = amount_match.group(1).replace(',', '.')
+                amount_str = amt_search.group(1).replace(',', '.')
                 amount = float(amount_str)
             except:
                 pass
 
         # 3. Extract Player Name (Everything before the first colon or action keyword)
-        prefix_parts = re.split(r'[:\-]|' + '|'.join(HandProcessor.KEYWORD_MAP.keys()), line, flags=re.IGNORECASE)
-        player_name = prefix_parts[0].strip() if prefix_parts else "unknown"
+        # Split by the DETECTED ACTION regex specifically
+        action_patterns = '|'.join(HandProcessor.KEYWORD_MAP.keys())
+        prefix_parts = re.split(action_patterns, line, flags=re.IGNORECASE, maxsplit=1)
+        player_name = prefix_parts[0].strip(' :').strip() if prefix_parts else "unknown"
 
         return {
             "player": player_name,
@@ -139,6 +150,16 @@ class HandProcessor:
             if line == 'RIVER': current_street = 'river'; i+=1; continue
             if line == 'BLINDS & ANTE': i+=1; continue
             
+            # Detect Board Card street changes by matching board card patterns in brackets [9d 3c 6h]
+            if '[' in line and ']' in line:
+                card_matches = re.findall(r'[AKQJT2-9][HDCS]', line, re.IGNORECASE)
+                if len(card_matches) == 3: current_street = 'flop'; i+=1; continue
+                if len(card_matches) == 1: 
+                    # If we only see 1 card [Ks], it's Turn or River
+                    if current_street == 'flop': current_street = 'turn'
+                    elif current_street == 'turn': current_street = 'river'
+                    i += 1; continue
+
             # Since we already parsed `actions` earlier, we can just match it by player name
             # Or we can just rebuild the actions here using the existing parser:
             parsed = self.parse_action_line(raw_actions[i])
