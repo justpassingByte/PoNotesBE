@@ -18,10 +18,13 @@ export class AuthController {
             // Auto-login after registration
             const { token, user } = await AuthService.login(email, password, deviceId);
 
+            const isProduction = process.env.NODE_ENV === 'production';
             res.cookie('token', token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+                secure: isProduction,
+                sameSite: isProduction ? 'none' : 'lax',
+                maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+                path: '/'
             });
 
             res.status(201).json({ success: true, token, user });
@@ -44,10 +47,13 @@ export class AuthController {
             const { token, user } = await AuthService.login(email, password, deviceId);
 
             // Set cookie (optional but professional)
+            const isProduction = process.env.NODE_ENV === 'production';
             res.cookie('token', token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+                secure: isProduction,
+                sameSite: isProduction ? 'none' : 'lax',
+                maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+                path: '/'
             });
 
             res.json({ success: true, token, user });
@@ -68,7 +74,13 @@ export class AuthController {
                 await AuthService.logout(sessionId);
             }
             
-            res.clearCookie('token');
+            const isProduction = process.env.NODE_ENV === 'production';
+            res.clearCookie('token', {
+                httpOnly: true,
+                secure: isProduction,
+                sameSite: isProduction ? 'none' : 'lax',
+                path: '/'
+            });
             res.json({ success: true, message: 'Logged out successfully' });
         } catch (error) {
             res.status(500).json({ success: false, error: 'Logout failed' });
@@ -88,11 +100,12 @@ export class AuthController {
 
             const { token, user } = await AuthService.refreshTokenForSession(sessionId);
 
+            const isProduction = process.env.NODE_ENV === 'production';
             res.cookie('token', token, {
                 httpOnly: true,
-                secure: process.env.NEXT_PUBLIC_API_URL?.startsWith('https') || process.env.NODE_ENV === 'production',
+                secure: isProduction,
+                sameSite: isProduction ? 'none' : 'lax',
                 maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-                sameSite: 'lax',
                 path: '/'
             });
 
