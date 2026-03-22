@@ -278,20 +278,24 @@ export class PaymentController extends BaseController {
             if (invoice.status === 'PENDING' || invoice.status === 'CONFIRMING') {
                 if (invoice.nowpayments_id) {
                     try {
-                        const externalStatus = await nowPaymentsService.getPaymentStatus(invoice.nowpayments_id);
-                        
-                        // If external status is more advanced, trigger a sync
-                        // We construct a mock webhook payload to reuse existing robust logic
-                        if (externalStatus.payment_status && externalStatus.payment_status.toLowerCase() !== invoice.status.toLowerCase()) {
-                            console.log(`[Sync] Triggering manual sync for ${invoice.id} — Remote status: ${externalStatus.payment_status}`);
+                        // Use getInvoiceStatus since nowpayments_id for 'hosted checkout' refers to the invoice ID.
+                        const externalInvoice = await nowPaymentsService.getInvoiceStatus(invoice.nowpayments_id);
+                        const externalStatus = (externalInvoice?.status || 'unknown').toUpperCase();
+                        const actuallyPaid = externalInvoice?.actually_paid || 0;
+
+                        console.log(`[Self-Healing] Polled status for ${invoice.id}: ${externalStatus} (DB was ${invoice.status})`);
+
+                        // If external status is different or payment confirmed, trigger a sync
+                        if (externalStatus !== invoice.status.toUpperCase() || (actuallyPaid > 0 && actuallyPaid !== invoice.actually_paid)) {
+                            console.log(`[Sync] Triggering manual sync for ${invoice.id} — Remote status: ${externalStatus}`);
                             
                             await paymentService.processWebhook({
-                                payment_id: invoice.nowpayments_id,
-                                payment_status: externalStatus.payment_status,
+                                payment_id: invoice.nowpayments_id, // For invoices, we use invoice ID as proxy
+                                payment_status: externalStatus,
                                 price_amount: invoice.amount,
                                 price_currency: 'usd',
-                                pay_currency: 'unknown', // not critical for this sync
-                                actually_paid: externalStatus.actually_paid || 0,
+                                pay_currency: externalInvoice?.pay_currency || 'unknown',
+                                actually_paid: actuallyPaid,
                                 order_id: invoice.id,
                             }, true);
 
