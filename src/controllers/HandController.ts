@@ -73,7 +73,8 @@ export class HandController extends BaseController {
                 cursor: req.query.cursor as string,
                 tag: req.query.tag as string,
                 gameType: req.query.gameType as string,
-                minPot: req.query.minPot ? parseInt(req.query.minPot as string) : undefined
+                minPot: req.query.minPot ? parseInt(req.query.minPot as string) : undefined,
+                playerName: req.query.playerName as string
             });
 
             this.handleSuccess(res, hands);

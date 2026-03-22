@@ -45,6 +45,17 @@ export class AuthService {
             throw new Error('Invalid credentials');
         }
 
+        // --- Subscription Guard: Auto-Degrade ---
+        if (user.premium_tier !== 'FREE' && user.subscription_expiry && new Date(user.subscription_expiry) < new Date()) {
+            console.log(`[SubscriptionGuard] User ${user.email} subscription expired. Degrading to FREE.`);
+            await prisma.user.update({
+                where: { id: user.id },
+                data: { premium_tier: 'FREE' }
+            });
+            user.premium_tier = 'FREE'; // Update local object for token
+        }
+        // ----------------------------------------
+
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             throw new Error('Invalid credentials');
@@ -100,6 +111,18 @@ export class AuthService {
         });
 
         if (!session) return null;
+
+        // --- Real-time Subscription Guard ---
+        const user = session.user;
+        if (user.premium_tier !== 'FREE' && user.subscription_expiry && new Date(user.subscription_expiry) < new Date()) {
+            console.log(`[SubscriptionGuard] Session sync: User ${user.email} expired. Degrading.`);
+            const updatedUser = await prisma.user.update({
+                where: { id: user.id },
+                data: { premium_tier: 'FREE' }
+            });
+            return updatedUser;
+        }
+        // ------------------------------------
 
         // Update last active
         await prisma.session.update({

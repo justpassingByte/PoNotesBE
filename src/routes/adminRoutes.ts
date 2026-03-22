@@ -121,17 +121,45 @@ router.delete('/pricing/:id', isAdmin, asyncErrorWrapper(async (req, res) => {
     res.json({ success: true, message: 'Plan deleted' });
 }));
 
-// GET /api/admin/stats - Overview stats
+// GET /api/admin/stats - Overview stats with real growth and activity
 router.get('/stats', isAdmin, asyncErrorWrapper(async (req, res) => {
     const totalUsers = await prisma.user.count();
     const premiumUsers = await prisma.user.count({ where: { premium_tier: { not: 'FREE' } } });
     
     // Revenue calc from Invoices
-    const paidInvoices = await prisma.invoice.findMany({ where: { status: 'FINISHED' } });
-    const totalRevenue = paidInvoices.reduce((acc, inv) => acc + (inv.amount || 0), 0);
+    const paidInvoices = await prisma.invoice.findMany({ 
+        where: { status: 'FINISHED' },
+        orderBy: { created_at: 'desc' },
+        take: 20, // Most recent for activity
+        include: { user: { select: { email: true } } }
+    });
+    
+    const allPaidInvoices = await prisma.invoice.findMany({ where: { status: 'FINISHED' } });
+    const totalRevenue = allPaidInvoices.reduce((acc, inv) => acc + (inv.amount || 0), 0);
     
     // Recent hands count
     const totalHands = await prisma.hand.count();
+
+    // Power Users (at least 1 hand)
+    const powerUsers = await prisma.user.count({
+        where: { hands: { some: {} } }
+    });
+
+    // Growth Metrics (Last 7 days registration)
+    const growth = [];
+    for (let i = 6; i >= 0; i--) {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        start.setDate(start.getDate() - i);
+        
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+
+        const count = await prisma.user.count({
+            where: { created_at: { gte: start, lt: end } }
+        });
+        growth.push(count);
+    }
 
     res.json({
         success: true,
@@ -140,14 +168,45 @@ router.get('/stats', isAdmin, asyncErrorWrapper(async (req, res) => {
             premiumUsers,
             totalRevenue,
             totalHands,
-            conversionRate: totalUsers > 0 ? ((premiumUsers / totalUsers) * 100).toFixed(1) : 0
+            loyalUsers: powerUsers,
+            conversionRate: totalUsers > 0 ? ((premiumUsers / totalUsers) * 100).toFixed(1) : 0,
+            growth,
+            recentActivity: paidInvoices.map(inv => ({
+                id: inv.id,
+                email: inv.user.email,
+                amount: inv.amount,
+                tier: inv.tier_requested,
+                date: inv.created_at
+            }))
         }
     });
 }));
 
-// GET /api/admin/users - List users with their usage and expiry
+// GET /api/admin/users - List users with filters
 router.get('/users', isAdmin, asyncErrorWrapper(async (req, res) => {
-    const users = await prisma.user.findMany({
+    const { tier, status, search } = req.query;
+    
+    const where: any = {};
+    
+    if (tier && tier !== 'ALL') {
+        where.premium_tier = tier;
+    }
+    
+    if (status) {
+        if (status === 'EXPIRED') {
+            where.subscription_expiry = { lte: new Date() };
+            where.premium_tier = { not: 'FREE' };
+        } else if (status === 'ACTIVE') {
+            where.subscription_expiry = { gte: new Date() };
+        }
+    }
+    
+    if (search) {
+        where.email = { contains: search as string, mode: 'insensitive' };
+    }
+
+    const users = await (prisma.user as any).findMany({
+        where,
         select: {
             id: true,
             email: true,
@@ -158,7 +217,7 @@ router.get('/users', isAdmin, asyncErrorWrapper(async (req, res) => {
             _count: { select: { hands: true } },
             usages: {
                 orderBy: { period_start: 'desc' },
-                take: 5 // Get most recent usage buckets
+                take: 5 
             }
         },
         orderBy: { created_at: 'desc' }

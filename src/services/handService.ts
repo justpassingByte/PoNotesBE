@@ -358,6 +358,7 @@ If the Rule Engine says it's a mistake, analyze it as such. Do NOT contradict th
         tag?: string;
         gameType?: string;
         minPot?: number;
+        playerName?: string;
     }) {
         return this.handRepository.findByUserId(userId, options);
     }

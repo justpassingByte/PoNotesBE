@@ -16,6 +16,7 @@ export class HandRepository {
         gameType?: string;
         boardCards?: string[];
         minPot?: number;
+        playerName?: string;
     }) {
         const where: Prisma.HandWhereInput = { user_id: userId };
 
@@ -34,6 +35,17 @@ export class HandRepository {
             where.parsed_data = {
                 path: ['pot'],
                 gte: options.minPot
+            } as any;
+        }
+
+        if (options?.playerName) {
+            // Prisma doesn't support easy "contains" in JSON array elements via findMany filter directly for every scenario,
+            // but for simple string matching in path, we can use string_contains or similar if data is structured.
+            // Since players is an array of objects, we use a more complex path or let standard JSON logic handle it.
+            // For now, we'll use a path check if possible or raw query for exact player name match in the session.
+            where.parsed_data = {
+                path: ['players'],
+                array_contains: { name: options.playerName }
             } as any;
         }
 
