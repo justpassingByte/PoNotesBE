@@ -228,10 +228,10 @@ export class HandService {
             : getModelForTier(tier);
             
         const modelName = modelInfo.model;
-        const isChatGPT = modelInfo.provider === 'openai' || modelName.startsWith('gpt-');
+        const isChatGPT = modelName.startsWith('gpt-') || modelName.startsWith('o1-') || modelName.startsWith('o3-');
         
         const client = new OpenAI({
-            apiKey: isChatGPT ? process.env.OPENAI_API_KEY : groqKey || '',
+            apiKey: isChatGPT ? process.env.OPENAI_API_KEY : (process.env.GROQ_API_KEY || ''),
             baseURL: isChatGPT ? undefined : 'https://api.groq.com/openai/v1'
         });
 
