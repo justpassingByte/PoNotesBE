@@ -13,7 +13,7 @@ export class DashboardController {
         try {
             const userId = (req as any).user.id;
             const tier = (req as any).user.premium_tier || 'FREE';
-            const cacheKey = `dashboard_${userId}`;
+            const cacheKey = `dashboard_v3_${userId}`;
 
             // 1. Try to serve instantly from Cache (0ms latency!)
             const cachedData = dashboardCache.get(cacheKey);

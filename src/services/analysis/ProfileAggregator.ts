@@ -9,6 +9,7 @@ interface TendencyScore {
 }
 
 import { PokerNoteParser } from './PokerNoteParser';
+import { LoggerService, LogType } from '../loggerService';
 
 export class ProfileAggregator {
     /**
@@ -62,9 +63,10 @@ export class ProfileAggregator {
         // 4. Call AI for Profiling
         console.log(`\n--- [PlayerProfiling] AI PROMPT SENT ---`);
         let profile = null;
+        let playerRecord = null;
         try {
             // Bug #13 Fix: Respect is_enabled flag for profiling too
-            const playerRecord = await prisma.player.findUnique({ where: { id: playerId }, select: { user_id: true } });
+            playerRecord = await prisma.player.findUnique({ where: { id: playerId }, select: { user_id: true } });
             if (playerRecord) {
                 const aiConfig = await prisma.userAIConfig.findUnique({ where: { user_id: playerRecord.user_id } });
                 if (aiConfig && aiConfig.is_enabled === false) {
@@ -88,6 +90,13 @@ export class ProfileAggregator {
         
         // 5. Save to DB (Updated sync logic)
         if (profile && profile.archetype) {
+            await LoggerService.log(
+                playerRecord?.user_id || 'system',
+                LogType.PROFILE_EVOLUTION,
+                `Evolution: Player archetype refined to ${profile.archetype}. Confidence: ${profile.confidence || 'unknown'}.`,
+                { archetype: profile.archetype, notes_count: notes.length }
+            );
+
             await prisma.player.update({
                 where: { id: playerId },
                 data: { 

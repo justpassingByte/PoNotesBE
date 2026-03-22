@@ -57,7 +57,11 @@ export class HandRepository {
                 cursor: { id: options.cursor }
             } : {}),
             orderBy: { created_at: 'desc' },
-            include: { notes: true }
+            include: { 
+                notes: true,
+                // @ts-ignore
+                system_logs: { orderBy: { created_at: 'asc' } }
+            }
         });
     }
 

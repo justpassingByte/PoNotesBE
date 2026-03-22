@@ -251,14 +251,9 @@ ${aggressionRules}
 3. NO HALLUCINATION: Zero tolerance for non-existent tendencies.
 `;
 
-    if (customPrompt) return `${configBlock}\n\n### CUSTOM BASE PROMPT:\n${customPrompt}\n${systemFooter}`;
-
-    return `You are a Tier-1 Poker Data Scientist and Professional Exploitative Pro.
-Given the following STRUCTURED TENDENCIES and RAW CONTEXTUAL NOTES, build a high-stakes strategic profile.
-
-${configBlock}
-
-### OUTPUT SCHEMA (STRICT JSON):
+    const schemaBlock = `
+### CRITICAL: JSON OUTPUT STRUCTURE
+You MUST return a JSON object with this EXACT schema. Any missing fields will cause system failure.
 {
   "archetype": "NIT | TAG | LAG | FISH | MANIAC | CALLING STATION | WHALE | UNKNOWN",
   "confidence": 0.0-1.0,
@@ -269,6 +264,18 @@ ${configBlock}
   "range_adjustments": ["Actionable range tweaks (e.g. '3-bet 15%+', 'C-bet 1/3 pot only')", "Max 3 items"],
   "gto_deviation_reason": "Strategy > GTO explanation"
 }
+`;
+
+    const basePrompt = customPrompt 
+        ? `### USER CUSTOM INSTRUCTIONS (PRIORITY):\n${customPrompt}\n`
+        : `You are a Tier-1 Poker Data Scientist and Professional Exploitative Pro.
+Given the following STRUCTURED TENDENCIES and RAW CONTEXTUAL NOTES, build a high-stakes strategic profile.`;
+
+    return `${configBlock}
+
+${basePrompt}
+
+${schemaBlock}
 
 ${systemFooter}`;
 }

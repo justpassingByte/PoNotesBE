@@ -56,7 +56,8 @@ model User {
   invoices Invoice[]
   players  Player[]    @relation("UserPlayers")
   notes    Note[]      @relation("UserNotes")
-  aiConfig UserAIConfig?
+  aiConfig    UserAIConfig?
+  system_logs SystemLog[]
 }
 
 model UserAIConfig {
@@ -207,6 +208,7 @@ model Hand {
 
   user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
   notes Note[]
+  system_logs SystemLog[]
 
   @@index([user_id])
 }
@@ -284,3 +286,20 @@ model PaymentEvent {
 
   invoice Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
 }
+model SystemLog {
+  id          String   @id @default(uuid())
+  user_id     String
+  hand_id     String?
+  event_type  String   // "OCR_FEEDBACK" | "AI_LEARNING" | "PROFILE_EVOLUTION" | "SYSTEM"
+  message     String
+  metadata    Json?    // Contextual data like old_val, new_val
+  created_at  DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  hand Hand? @relation(fields: [hand_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id])
+  @@index([hand_id])
+  @@index([created_at])
+}
+

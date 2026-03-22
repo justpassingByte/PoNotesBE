@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
 import axios from 'axios';
+import { LoggerService, LogType } from '../services/loggerService';
 
 const router = Router();
 
@@ -13,12 +14,13 @@ const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://ocr-api:8000';
  * Forwards the action to the OCR service Celery task `apply_feedback`.
  * 
  * Body:
- *   { imageHex: string, cardName: string, action: "confirm"|"edit"|"reject", correctedName?: string }
+ *   { imageHex: string, cardName: string, action: "confirm"|"edit"|"reject", correctedName?: string, handId?: string }
  */
 router.post(
     '/feedback',
     asyncErrorWrapper(async (req: Request, res: Response) => {
-        const { imageHex, cardName, action, correctedName = '' } = req.body;
+        const { imageHex, cardName, action, correctedName = '', handId } = req.body;
+        const userId = (req as any).user?.id || 'system';
 
         if (!imageHex || !cardName || !action) {
             return res.status(400).json({ error: 'imageHex, cardName, and action are required.' });
@@ -33,6 +35,17 @@ router.post(
         }
 
         try {
+            // Log the feedback event for self-learning tracking
+            await LoggerService.log(
+                userId,
+                LogType.OCR_FEEDBACK,
+                action === 'confirm' 
+                    ? `Confirmed detection of [${cardName}]`
+                    : `Corrected [${cardName}] to [${correctedName}]`,
+                { cardName, action, correctedName, imageHex: imageHex.slice(0, 16) + '...' },
+                handId
+            );
+
             const response = await axios.post(`${OCR_SERVICE_URL}/feedback`, {
                 image_hex:      imageHex,
                 card_name:      cardName,
