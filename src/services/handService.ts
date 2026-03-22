@@ -1,5 +1,6 @@
 import { HandRepository } from '../repositories/HandRepository';
 import { UsageService } from './usageService';
+import crypto from 'crypto';
 import { generateHandHash } from '../utils/handHasher';
 import { ParsedHandSchema, HandAnalysisSchema, ParsedHand, HandAnalysis } from '../validators/hand.schema';
 import { getModelForTier, buildHandAnalysisPrompt, buildHandOcrPrompt } from './promptManager';
@@ -25,8 +26,12 @@ export class HandService {
         inputType: 'text' | 'image';
         tier: PremiumTier;
     }): Promise<{ hand: any; fromCache: boolean }> {
-        // Include userId in hash to prevent cross-user leakage
-        const hash = generateHandHash(`${params.userId}:${params.rawInput}`);
+        // 1. Generate unique hash for caching
+        // For text, we normalize (strip names/dates). For images, we use raw content to ensure uniqueness.
+        const hashInput = `${params.userId}:${params.rawInput}`;
+        const hash = params.inputType === 'text' 
+            ? generateHandHash(hashInput)
+            : crypto.createHash('sha256').update(hashInput).digest('hex');
 
         // Check if we already have this exact hand parsed
         const cached = await this.handRepository.findByHash(hash);
@@ -168,9 +173,16 @@ export class HandService {
 
             throw new Error('OCR Service Timeout (Max retries reached)');
 
-        } catch (error) {
+        } catch (error: any) {
             console.error('[HandService] OCR Integration Error:', error);
-            // Fallback to Vision AI if enabled or Mock
+            
+            // In Production: Never return mock data secretly
+            // Instead, throw so the user knows the OCR service is down/unreachable
+            if (process.env.NODE_ENV === 'production') {
+                throw new Error(`OCR Processing unavailable: ${error.message || 'Unknown error'}`);
+            }
+
+            // Fallback to Vision AI if enabled or Mock (Dev only)
             const apiKey = process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY;
             if (apiKey) {
                 console.log('[HandService] Falling back to Vision AI...');
