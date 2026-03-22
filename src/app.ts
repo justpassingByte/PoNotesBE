@@ -19,6 +19,8 @@ import { paymentRoutes } from './routes/paymentRoutes';
 import { authRoutes } from './routes/authRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import { adminRoutes } from './routes/adminRoutes';
+import usageRoutes from './routes/usageRoutes';
+import { ocrRoutes } from './routes/ocrRoutes';
 import cookieParser from 'cookie-parser';
 import { authMiddleware } from './middleware/authMiddleware';
 
@@ -101,6 +103,8 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/hands', handRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/usage', usageRoutes);
+app.use('/api/ocr', ocrRoutes);
 
 // Global Error Handler
 app.use(errorHandler);

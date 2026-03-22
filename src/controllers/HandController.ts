@@ -1,6 +1,13 @@
 import { Request, Response } from 'express';
 import { BaseController } from './BaseController';
 import { HandService } from '../services/handService';
+import { UsageService } from '../services/usageService';
+import { UsageActionType } from '@prisma/client';
+
+/** Serialize usage object — convert resetsAt Date to ISO string for JSON transport */
+function serializeUsage(usage: { allowed: boolean; used: number; limit: number; remaining: number; resetsAt: Date }) {
+    return { ...usage, resetsAt: usage.resetsAt.toISOString() };
+}
 
 export class HandController extends BaseController {
     constructor(private readonly handService: HandService) {
@@ -15,12 +22,21 @@ export class HandController extends BaseController {
         try {
             const { rawInput, inputType } = req.body;
             const userId = (req as any).user.id;
+            const tier = (req as any).user.premium_tier || 'FREE';
 
             if (!rawInput) {
                 return res.status(400).json({ success: false, error: 'rawInput is required' });
             }
 
-            const tier = (req as any).userTier || 'FREE';
+            // Check OCR quota specifically for images
+            let usage = undefined;
+            if (inputType === 'image') {
+                usage = await UsageService.checkQuota(userId, UsageActionType.OCR_HAND, tier);
+                if (!usage.allowed) {
+                    return res.status(403).json({ success: false, error: 'OCR hand limit reached', usage: serializeUsage(usage) });
+                }
+            }
+
             const result = await this.handService.parseHand({
                 userId,
                 rawInput,
@@ -28,7 +44,12 @@ export class HandController extends BaseController {
                 tier
             });
 
-            this.handleSuccess(res, result, 200);
+            // Re-fetch usage info after processing if it was an image
+            if (inputType === 'image' && !result.fromCache) {
+                usage = await UsageService.checkQuota(userId, UsageActionType.OCR_HAND, tier);
+            }
+
+            this.handleSuccess(res, { ...result, usage: usage ? serializeUsage(usage) : undefined }, 200);
         } catch (error) {
             this.handleError(error, res, 'HandController.parseHand');
         }
@@ -42,12 +63,18 @@ export class HandController extends BaseController {
         try {
             const { handId, parsedData } = req.body;
             const userId = (req as any).user.id;
+            const tier = (req as any).user.premium_tier || 'FREE';
 
             if (!handId) {
                 return res.status(400).json({ success: false, error: 'handId is required' });
             }
 
-            const tier = (req as any).userTier || 'FREE';
+            // Check AI quota
+            let usage = await UsageService.checkQuota(userId, UsageActionType.AI_ANALYZE, tier);
+            if (!usage.allowed) {
+                return res.status(403).json({ success: false, error: 'AI analysis limit reached', usage: serializeUsage(usage) });
+            }
+
             const analysis = await this.handService.analyzeHand({
                 userId,
                 handId,
@@ -55,7 +82,10 @@ export class HandController extends BaseController {
                 tier
             });
 
-            this.handleSuccess(res, { analysis }, 200);
+            // Refresh usage info
+            usage = await UsageService.checkQuota(userId, UsageActionType.AI_ANALYZE, tier);
+
+            this.handleSuccess(res, { analysis, usage: serializeUsage(usage) }, 200);
         } catch (error) {
             this.handleError(error, res, 'HandController.analyzeHand');
         }
@@ -68,12 +98,15 @@ export class HandController extends BaseController {
         try {
             const userId = (req as any).user.id;
             
+            const minPotRaw = req.query.minPot as string;
+            const minPot = (minPotRaw && !isNaN(parseInt(minPotRaw))) ? parseInt(minPotRaw) : undefined;
+            
             const hands = await this.handService.getHistory(userId, {
                 limit: parseInt(req.query.limit as string) || 20,
                 cursor: req.query.cursor as string,
                 tag: req.query.tag as string,
                 gameType: req.query.gameType as string,
-                minPot: req.query.minPot ? parseInt(req.query.minPot as string) : undefined,
+                minPot: minPot,
                 playerName: req.query.playerName as string
             });
 

@@ -56,6 +56,20 @@ model User {
   invoices Invoice[]
   players  Player[]    @relation("UserPlayers")
   notes    Note[]      @relation("UserNotes")
+  aiConfig UserAIConfig?
+}
+
+model UserAIConfig {
+  user_id           String  @id
+  system_prompt     String? @db.Text
+  exploit_prompt    String? @db.Text
+  analysis_prompt   String? @db.Text
+  model_name        String  @default("gpt-4o")
+  temperature       Float   @default(0.7)
+  is_enabled        Boolean @default(true)
+  updated_at        DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 }
 
 // ─── Dynamic Pricing ─────────────────────────────────────────────────────────
@@ -149,15 +163,17 @@ model Player {
 }
 
 model Note {
-  id         String   @id @default(uuid())
-  user_id    String
-  player_id  String
-  street     String
-  note_type  String
-  content    String
-  source     String   @default("custom") // "template" | "custom"
-  hand_id    String?  // Optional link to analyzed hand
-  created_at DateTime @default(now())
+  id              String   @id @default(uuid())
+  user_id         String
+  player_id       String
+  street          String
+  note_type       String   @default("TEXT")
+  content         String
+  category        String   @default("GENERAL") // "EXPLOIT" | "LEAK" | "TELL" | "GENERAL"
+  source          String   @default("custom")  // "template" | "custom" | "ai"
+  is_ai_generated Boolean  @default(false)
+  hand_id         String?  // Optional link to analyzed hand
+  created_at      DateTime @default(now())
 
   user   User   @relation("UserNotes", fields: [user_id], references: [id], onDelete: Cascade)
   player Player @relation(fields: [player_id], references: [id])

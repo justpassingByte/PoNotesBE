@@ -1,5 +1,6 @@
 import { HandRepository } from '../repositories/HandRepository';
 import { UsageService } from './usageService';
+import { prisma } from '../lib/prisma';
 import crypto from 'crypto';
 import { generateHandHash } from '../utils/handHasher';
 import { ParsedHandSchema, HandAnalysisSchema, ParsedHand, HandAnalysis } from '../validators/hand.schema';
@@ -9,7 +10,7 @@ import { PremiumTier, UsageActionType } from '@prisma/client';
 export class HandService {
     constructor(
         private readonly handRepository: HandRepository,
-        private readonly usageService: UsageService
+        private readonly usageService?: UsageService  // Optional: we use static UsageService methods directly
     ) {}
 
     /**
@@ -42,8 +43,20 @@ export class HandService {
         // 1. Process OCR or Text
         let parsedData: ParsedHand | null = null;
         if (params.inputType === 'image') {
-            parsedData = await this.ocrParseImage(params.rawInput, params.tier);
-            await this.usageService.incrementUsage(params.userId, UsageActionType.OCR_HAND, params.tier);
+            const ocrResponse = await this.ocrParseImage(params.rawInput, params.tier);
+            parsedData = ocrResponse.data;
+            
+            // Inject OCR metadata into the parsed data for the UI
+            (parsedData as any).ocr_result = {
+                confidence: ocrResponse.confidence,
+                decision: ocrResponse.decision,
+                decision_reason: ocrResponse.decision_reason,
+                needs_confirmation: ocrResponse.needs_confirmation,
+                breakdown: ocrResponse.breakdown,
+                performance: ocrResponse.performance
+            };
+            
+            await UsageService.incrementUsage(params.userId, UsageActionType.OCR_HAND, params.tier);
         } else {
             parsedData = this.parseTextHand(params.rawInput);
         }
@@ -78,8 +91,8 @@ export class HandService {
         const finalParsedData = params.parsedData || (hand.parsed_data as unknown as ParsedHand);
 
         // 2. Run LLM Analysis
-        const analysis = await this.runAnalysis(finalParsedData, params.tier);
-        await this.usageService.incrementUsage(params.userId, UsageActionType.AI_ANALYZE, params.tier);
+        const analysis = await this.runAnalysis(finalParsedData, params.tier, params.userId);
+        await UsageService.incrementUsage(params.userId, UsageActionType.AI_ANALYZE, params.tier);
 
         // 3. Update hand with analysis
         await this.handRepository.update(params.userId, params.handId, {
@@ -87,7 +100,134 @@ export class HandService {
             parsed_data: finalParsedData as any // Save user corrections if any
         });
 
-        return analysis;
+        // 4. AUTO-EXTRACT NOTES FROM ANALYSIS
+        let notesCreated: string[] = [];
+        try {
+            notesCreated = await this.autoExtractNotesFromAnalysis(params.userId, hand, finalParsedData, analysis);
+        } catch (noteErr) {
+            console.error('[HandService] Failed to auto-extract notes:', noteErr);
+        }
+
+        return { ...analysis, notesCreated };
+    }
+
+    /**
+     * Helper to automatically create notes from AI analysis findings.
+     */
+    private async autoExtractNotesFromAnalysis(userId: string, hand: any, parsedHand: ParsedHand, analysis: HandAnalysis): Promise<string[]> {
+        if (!analysis.villainMistakes || analysis.villainMistakes.length === 0) return [];
+
+        const createdNoteIds: string[] = [];
+        console.log(`[HandService] Auto-extracting ${analysis.villainMistakes.length} notes for hand ${hand.id}...`);
+
+        for (const mistake of analysis.villainMistakes) {
+            if (!mistake.playerName || !mistake.description) continue;
+
+            const playerName = mistake.playerName;
+            
+            // 1. Find or Create player (Bug #2 Fix: Don't skip new players)
+            let player = await prisma.player.findFirst({
+                where: {
+                    user_id: userId,
+                    name: { equals: playerName, mode: 'insensitive' }
+                }
+            });
+
+            if (!player) {
+                // We need a platform. We'll look for or create a "General" platform
+                const generalPlatform = await prisma.platform.upsert({
+                    where: { name: 'General' },
+                    update: {},
+                    create: { name: 'General' }
+                });
+
+                player = await prisma.player.create({
+                    data: {
+                        user_id: userId,
+                        name: playerName,
+                        platform_id: generalPlatform.id,
+                        playstyle: 'UNKNOWN'
+                    }
+                });
+                console.log(`[HandService] Auto-created new player record for: ${playerName}`);
+            }
+
+            // 2. Avoid Duplicates (Bug #12 Fix)
+            const existingNote = await prisma.note.findFirst({
+                where: {
+                    hand_id: hand.id,
+                    player_id: player.id,
+                    content: { contains: mistake.description.substring(0, 50) } // Match partial content to be safe
+                }
+            });
+
+            if (existingNote) {
+                console.log(`[HandService] Note already exists for ${playerName} in this hand. Skipping.`);
+                continue;
+            }
+
+            // 3. Create the note
+            const street = (mistake.street?.toLowerCase() || 'general') as any;
+            const note = await prisma.note.create({
+                data: {
+                    user_id: userId,
+                    player_id: player.id,
+                    hand_id: hand.id,
+                    street: street,
+                    content: `[AI Analysis] ${mistake.description}`,
+                    is_ai_generated: true,
+                    source: 'ai',
+                    category: 'GENERAL',
+                }
+            });
+            createdNoteIds.push(note.id);
+            console.log(`[HandService] Auto-note created for ${playerName}: ${mistake.description.substring(0, 30)}...`);
+        }
+
+        // Also add the general exploit suggestion to players mentioned in it
+        if (analysis.exploitSuggestion) {
+            const playersInHand = parsedHand.players || [];
+            for (const p of playersInHand) {
+                if (analysis.exploitSuggestion.toLowerCase().includes(p.name.toLowerCase())) {
+                    // Find or create for exploit too
+                    let playerRecord = await prisma.player.findFirst({
+                        where: { user_id: userId, name: { equals: p.name, mode: 'insensitive' } }
+                    });
+
+                    if (!playerRecord) {
+                        const generalPlatform = await prisma.platform.upsert({
+                            where: { name: 'General' },
+                            update: {},
+                            create: { name: 'General' }
+                        });
+                        playerRecord = await prisma.player.create({
+                            data: {
+                                user_id: userId,
+                                name: p.name,
+                                platform_id: generalPlatform.id,
+                                playstyle: 'UNKNOWN'
+                            }
+                        });
+                    }
+
+                    const note = await prisma.note.create({
+                        data: {
+                            user_id: userId,
+                            player_id: playerRecord.id,
+                            hand_id: hand.id,
+                            street: 'GENERAL',
+                            content: `[AI Exploit] ${analysis.exploitSuggestion}`,
+                            is_ai_generated: true,
+                            source: 'ai',
+                            category: 'EXPLOIT'
+                        }
+                    });
+                    createdNoteIds.push(note.id);
+                }
+            }
+        }
+
+        return createdNoteIds;
     }
 
     /**
@@ -97,8 +237,8 @@ export class HandService {
     /**
      * OCR parse an image into structured hand JSON using our local Python OCR Service.
      */
-    private async ocrParseImage(imageUrl: string, tier: PremiumTier): Promise<ParsedHand> {
-        const ocrServiceUrl = process.env.OCR_SERVICE_URL || 'http://localhost:8000';
+    private async ocrParseImage(imageUrl: string, tier: PremiumTier): Promise<any> {
+        const ocrServiceUrl = process.env.OCR_SERVICE_URL || 'http://ocr-api:8000';
         
         try {
             console.log(`[HandService] Dispatching OCR task to ${ocrServiceUrl}...`);
@@ -160,17 +300,11 @@ export class HandService {
                 if (pollData.status === 'success') {
                     console.log(`[HandService] OCR Success for ${job_id} in ${currentRetry + 1}s`);
                     
-                    // Detailed log to debug "nothing returns" issue
-                    console.log("[OCR Result Raw]:", JSON.stringify(pollData.result, null, 2));
-
-                    // Defensive data extraction
-                    const resultData = pollData.result.data || pollData.result; // Use .data if exists, else the result itself
-                    
-                    if (!resultData || Object.keys(resultData).length === 0) {
-                        console.warn(`[HandService] Warning: OCR result for ${job_id} is empty!`);
+                    if (!pollData.result || !pollData.result.data) {
+                        console.warn(`[HandService] Warning: OCR result for ${job_id} is incomplete!`, pollData.result);
                     }
 
-                    return resultData;
+                    return pollData.result; // Return the full wrapper (data + confidence)
                 }
 
                 if (pollData.status === 'error') {
@@ -224,9 +358,21 @@ export class HandService {
      * Run AI analysis on a parsed hand.
      * MOCK MODE: Returns sample analysis when no API keys are configured.
      */
-    private async runAnalysis(parsedData: ParsedHand | null, tier: PremiumTier): Promise<HandAnalysis> {
+    private async runAnalysis(parsedData: ParsedHand | null, tier: PremiumTier, userId?: string): Promise<HandAnalysis> {
         const groqKey = process.env.GROQ_API_KEY;
-        const prompt = buildHandAnalysisPrompt();
+        
+        // Fetch Custom Prompt if userId provided
+        let customAnalysisPrompt = undefined;
+        let aiConfig = null;
+        if (userId) {
+            aiConfig = await prisma.userAIConfig.findUnique({
+                where: { user_id: userId }
+            });
+            
+            customAnalysisPrompt = aiConfig?.analysis_prompt || undefined;
+        }
+
+        const prompt = buildHandAnalysisPrompt(customAnalysisPrompt);
         const payload = JSON.stringify(parsedData, null, 2);
 
         // 1. RUN DETERMINISTIC RULE ENGINE FIRST (Ground Truth)
@@ -237,6 +383,13 @@ export class HandService {
             console.log('[HandAnalysis] Rule Engine identified mistakes:', ruleEngineResult.heroMistakes.length + ruleEngineResult.villainMistakes.length);
         } catch (ruleErr) {
             console.error('[HandAnalysis] Rule Engine Error (skipping to pure AI):', ruleErr);
+        }
+
+        // Bug #13 Fix: Respect is_enabled flag (Move here to use ruleEngineResult fallback)
+        if (userId && aiConfig && aiConfig.is_enabled === false) {
+            console.log(`[HandAnalysis] AI is disabled for user ${userId}. Skipping LLM analysis.`);
+            if (ruleEngineResult) return ruleEngineResult as any;
+            throw new Error('AI Analysis is disabled in your settings.');
         }
 
         // 2. TRY GROQ (Main Provider) with Hybrid Context
@@ -264,18 +417,22 @@ If the Rule Engine says it's a mistake, analyze it as such. Do NOT contradict th
                 console.log('----------------------\n');
 
                 const OpenAI = require('openai');
-                const groq = new OpenAI({
-                    apiKey: groqKey,
-                    baseURL: 'https://api.groq.com/openai/v1'
+                const modelName = aiConfig?.model_name || 'llama-3.3-70b-versatile';
+                const isChatGPT = modelName.startsWith('gpt-');
+                
+                const client = new OpenAI({
+                    apiKey: isChatGPT ? process.env.OPENAI_API_KEY : groqKey,
+                    baseURL: isChatGPT ? undefined : 'https://api.groq.com/openai/v1'
                 });
 
                 const startTime = Date.now();
-                const completion = await groq.chat.completions.create({
+                const completion = await client.chat.completions.create({
                     messages: [
                         { role: 'system', content: enhancedPrompt },
                         { role: 'user', content: `Hand Data:\n${payload}` }
                     ],
-                    model: 'llama-3.3-70b-versatile',
+                    model: modelName,
+                    temperature: aiConfig?.temperature ?? 0.7,
                     response_format: { type: 'json_object' }
                 });
 

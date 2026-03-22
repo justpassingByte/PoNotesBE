@@ -61,7 +61,24 @@ export class ProfileAggregator {
 
         // 4. Call AI for Profiling
         console.log(`\n--- [PlayerProfiling] AI PROMPT SENT ---`);
-        const profile = await this.callAI(structuredData, playerId);
+        let profile = null;
+        try {
+            // Bug #13 Fix: Respect is_enabled flag for profiling too
+            const playerRecord = await prisma.player.findUnique({ where: { id: playerId }, select: { user_id: true } });
+            if (playerRecord) {
+                const aiConfig = await prisma.userAIConfig.findUnique({ where: { user_id: playerRecord.user_id } });
+                if (aiConfig && aiConfig.is_enabled === false) {
+                    console.log(`[PlayerProfiling] AI is disabled for user ${playerRecord.user_id}. Returning null.`);
+                    return null;
+                }
+            }
+
+            profile = await this.callAI(structuredData, playerId);
+        } catch (aiErr) {
+            // Bug #18 Fix: Graceful failure
+            console.error(`[PlayerProfiling] ERROR calling AI:`, aiErr);
+            return null; // Don't crash the whole request
+        }
 
         // ... AI Response Log and Update playstyle ...
         if (profile) {
@@ -111,34 +128,50 @@ export class ProfileAggregator {
 
     private static async callAI(structuredData: any[], playerId: string) {
         const groqKey = process.env.GROQ_API_KEY;
-        if (!groqKey) return null;
-
-        const groq = new OpenAI({
-            apiKey: groqKey,
-            baseURL: 'https://api.groq.com/openai/v1'
-        });
 
         try {
             // Fetch raw notes for context
-            const notes = await prisma.note.findMany({
-                where: { player_id: playerId },
-                take: 5,
-                orderBy: { created_at: 'desc' }
+            const [notes, player] = await Promise.all([
+                prisma.note.findMany({
+                    where: { player_id: playerId },
+                    take: 5,
+                    orderBy: { created_at: 'desc' }
+                }),
+                prisma.player.findUnique({
+                    where: { id: playerId },
+                    select: { user_id: true }
+                })
+            ]);
+
+            if (!player) return null;
+
+            // Fetch Custom Prompt
+            const aiConfig = await prisma.userAIConfig.findUnique({
+                where: { user_id: player.user_id }
+            });
+
+            const modelName = aiConfig?.model_name || 'llama-3.3-70b-versatile';
+            const isChatGPT = modelName.startsWith('gpt-');
+            
+            const client = new OpenAI({
+                apiKey: isChatGPT ? process.env.OPENAI_API_KEY : groqKey || '',
+                baseURL: isChatGPT ? undefined : 'https://api.groq.com/openai/v1'
             });
 
             const rawContent = notes.map(n => n.content).join('; ');
-            const prompt = buildProfilePrompt();
+            const prompt = buildProfilePrompt(aiConfig?.system_prompt || undefined);
             const inputText = `STRUCTURED TENDENCIES: ${JSON.stringify(structuredData, null, 2)}\n\nRAW CONTEXTUAL NOTES: ${rawContent}`;
 
-            console.log(`[PlayerProfiling] SYSTEM PROMPT:\n${prompt}`);
+            console.log(`[PlayerProfiling] SYSTEM PROMPT (User: ${player.user_id}):\n${prompt}`);
             console.log(`[PlayerProfiling] USER INPUT:\n${inputText}`);
 
-            const response = await groq.chat.completions.create({
+            const response = await client.chat.completions.create({
                 messages: [
                     { role: 'system', content: prompt },
                     { role: 'user', content: inputText }
                 ],
-                model: 'llama-3.3-70b-versatile',
+                model: modelName,
+                temperature: aiConfig?.temperature ?? 0.7,
                 response_format: { type: 'json_object' }
             });
 

@@ -3,7 +3,7 @@ import { UsageService } from '../services/usageService';
 import { UsageActionType, PremiumTier } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 
-const usageService = new UsageService();
+// UsageService uses static methods — no instantiation needed
 
 /**
  * Middleware factory: Creates a quota-checking middleware for a specific action type.
@@ -54,7 +54,7 @@ export function checkUsageQuota(actionType: UsageActionType) {
                 user = { premium_tier: devUser.premium_tier };
             }
 
-            const quota = await usageService.checkQuota(userId, actionType, user.premium_tier);
+            const quota = await UsageService.checkQuota(userId, actionType, user.premium_tier);
 
             if (!quota.allowed) {
                 res.status(429).json({
@@ -65,7 +65,7 @@ export function checkUsageQuota(actionType: UsageActionType) {
                         tier: user.premium_tier,
                         used: quota.used,
                         limit: quota.limit,
-                        resetsAt: quota.resetsAt
+                        resetsAt: quota.resetsAt.toISOString()
                     }
                 });
                 return;

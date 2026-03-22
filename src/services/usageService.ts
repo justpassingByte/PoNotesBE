@@ -15,11 +15,16 @@ const USAGE_LIMITS: Record<UsageActionType, Record<PremiumTier, number>> = {
 const ENTERPRISE_SOFT_CAP = 2000;
 
 export class UsageService {
-    private async getLimit(actionType: UsageActionType, tier: PremiumTier): Promise<number> {
+    private static async getLimit(actionType: UsageActionType, tier: PremiumTier): Promise<number> {
         try {
             const plan = await (prisma as any).pricingPlan.findUnique({ where: { id: tier } });
             if (plan) {
-                return actionType === 'AI_ANALYZE' ? plan.ai_limit : plan.ocr_limit;
+                switch (actionType) {
+                    case 'AI_ANALYZE': return plan.ai_limit;
+                    case 'OCR_HAND': return plan.hand_ocr_limit;
+                    case 'OCR_NAME': return plan.name_ocr_limit;
+                    default: return plan.ocr_limit;
+                }
             }
         } catch (e) {
             console.warn(`[UsageService] Could not fetch dynamic limit for ${tier}, using fallback.`);
@@ -27,12 +32,11 @@ export class UsageService {
         return USAGE_LIMITS[actionType][tier];
     }
 
-
     /**
      * Get the start of the current billing period.
      * FREE tier resets daily. Paid tiers reset monthly.
      */
-    private getPeriodStart(tier: PremiumTier): Date {
+    private static getPeriodStart(tier: PremiumTier): Date {
         const now = new Date();
         if (tier === 'FREE') {
             // Daily reset: start of today (UTC)
@@ -45,7 +49,7 @@ export class UsageService {
     /**
      * Check if user can perform the given action. Returns remaining count.
      */
-    async checkQuota(userId: string, actionType: UsageActionType, tier: PremiumTier): Promise<{
+    static async checkQuota(userId: string, actionType: UsageActionType, tier: PremiumTier): Promise<{
         allowed: boolean;
         used: number;
         limit: number;
@@ -90,7 +94,7 @@ export class UsageService {
     /**
      * Increment the usage counter. Call AFTER a successful AI/OCR operation.
      */
-    async incrementUsage(userId: string, actionType: UsageActionType, tier: PremiumTier): Promise<void> {
+    static async incrementUsage(userId: string, actionType: UsageActionType, tier: PremiumTier): Promise<void> {
         const periodStart = this.getPeriodStart(tier);
 
         await prisma.userUsage.upsert({
@@ -113,7 +117,7 @@ export class UsageService {
         });
     }
 
-    private getNextResetDate(tier: PremiumTier): Date {
+    private static getNextResetDate(tier: PremiumTier): Date {
         const now = new Date();
         if (tier === 'FREE') {
             // Tomorrow at 00:00 UTC

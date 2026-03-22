@@ -38,7 +38,8 @@ export function getModelForTier(tier: PremiumTier): { model: string; provider: '
  * Build the system prompt for hand analysis.
  * Expert-level version (V5) - Precision & Data Integrity.
  */
-export function buildHandAnalysisPrompt(): string {
+export function buildHandAnalysisPrompt(customPrompt?: string): string {
+    if (customPrompt) return customPrompt;
     return `You are a Tier-1 GTO Poker Solver and professional High-Stakes Coach.
 Your analysis must be 100% factually accurate, strategically deep, and actionable.
 
@@ -130,40 +131,38 @@ Return ONLY valid JSON, no markdown or extra text.`;
  * Build the player profile compilation prompt.
  * V2 - Archetype & High-Stakes Profiling Logic.
  */
-export function buildProfilePrompt(): string {
+export function buildProfilePrompt(customPrompt?: string): string {
+    if (customPrompt) return customPrompt;
+
     return `You are a Tier-1 Poker Data Scientist and Professional Exploitative Pro.
-Given the following STRUCTURED TENDENCIES (which include frequency and weight/strength), categorize this player and build a strategic profile.
+Given the following STRUCTURED TENDENCIES and RAW CONTEXTUAL NOTES, build a high-stakes strategic profile.
+
+### CORE OBJECTIVE:
+- MAXIMIZE EDGE: Identify every possible leak, even with limited data (use "potential" or "tentative" labels).
+- STRATEGIC PRECISION: Advice must be technical, referencing position, sizing, and frequency.
 
 ### PROFILE ARCHETYPES:
-- NIT: Extremely tight, only plays premium hands.
-- TAG: Tight-Aggressive (The standard winning reg).
-- LAG: Loose-Aggressive (Playing many hands aggressively).
-- FISH: Loose-Passive (Weak recreational player, calls too much).
-- MANIAC: Over-aggressive, bluffs way too much.
-- CALLING STATION: Sticky, hates folding, over-calls river bets.
-- WHALE: Massive fish, plays almost 100% of hands poorly.
+- NIT | TAG | LAG | FISH | MANIAC | CALLING STATION | WHALE | UNKNOWN
 
 ### JSON OUTPUT STRUCTURE (MANDATORY):
 {
-  "archetype": "nit|tag|lag|fish|maniac|calling_station|whale|unknown",
+  "archetype": "string",
   "confidence": number (0-1),
   "aggression_score": number (0-100),
   "looseness_score": number (0-100),
-  "leaks": ["Specific leak 1", "Specific leak 2"],
-  "strategy": "Actionable counter-strategy. Use 'likely' or 'potentially' if confidence < 0.7."
+  "leaks": ["Specific leak with positional context"],
+  "strategy": "Actionable counter-strategy. MUST includes: Sizing suggestions (e.g. 33%, 75%, Overbet) and Frequency (e.g. Pure, 50%, High frequency)."
 }
 
-### RULES:
-- LANGUAGE: Output MUST be in English only. Do NOT use any other language (e.g., no Chinese, no Vietnamese).
-- DATA INTEGRITY & CONFIDENCE: If total observations < 5, confidence MUST be <= 0.7.
-- LEAK THRESHOLD: If confidence < 0.7, return 'leaks': []. Only output leaks when data is sufficiently reliable.
-- ARCHETYPE SMOOTHING: If confidence < 0.7, prefer TAG/LAG over extreme types (maniac/whale) unless notes are very explicit.
-- PATTERN REASONING & STRATEGY:
-    * High frequency check-raise -> Strategy: Reduce c-bet frequency, check back more often. Prioritize positional advantage over aggression.
-    * Heavy preflop aggression -> Strategy: Tighten 4-bet range or call with more speculative hands if pot odds allow.
-- LEAK PREVENTION: NEVER hallucinate leaks not directly supported.
-- Confidence score: 1.0 = highly certain, 0.1 = limited data.
-- Return ONLY valid JSON, no markdown or extra text.`;
+### ANALYST RULES (PRO-LEVEL):
+1. ALLOW SOFT INFERENCE: If observations < 5 but tendencies show a clear outlier (e.g. 3bet 20%+ or fold to cbet 70%+), you MUST identify the potential leak. Do NOT return empty leaks just because data is low.
+2. REASONING DEPTH: Reference specific positions (IP/OOP) and action sequences (3bet/4bet/Defend).
+3. EXPLOIT SPECIFICITY: 
+   - Instead of "play tighter", use "Tighten 3-bet defense vs HJ 3x sizing. Fold speculative hands like small SCs."
+   - Instead of "bluff more", use "Over-bluff 3-bet preflop vs CO open using a 4x sizing. They fold 60%+ to 3-bets."
+4. NO HALLUCINATION: Support every claim with a data point from the context, even if the data point is a single hand.
+5. LANGUAGE: Output MUST be in English only.
+6. Return ONLY valid JSON, no markdown or extra text.`;
 }
 
 export { KEYWORD_MAP };

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
+import { SettingsController } from '../controllers/SettingsController';
 
 const router = Router();
 
@@ -35,5 +36,11 @@ router.patch('/', asyncErrorWrapper(async (req, res) => {
 
     res.json({ success: true, data: settings });
 }));
+
+// GET /api/settings/ai — returns current user AI config
+router.get('/ai', SettingsController.getAISettings);
+
+// PATCH /api/settings/ai — update user AI config
+router.patch('/ai', SettingsController.updateAISettings);
 
 export const settingsRoutes = router;

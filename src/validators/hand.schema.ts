@@ -28,7 +28,15 @@ export const ParsedHandSchema = z.object({
         river: z.array(HandActionSchema).default([])
     }),
     pot: z.number().optional(),
-    winner: z.string().optional()
+    winner: z.string().optional(),
+    ocr_result: z.object({
+        confidence: z.number(),
+        decision: z.string(),
+        decision_reason: z.array(z.string()),
+        needs_confirmation: z.boolean().optional(),
+        breakdown: z.any().optional(),
+        performance: z.any().optional()
+    }).optional()
 });
 
 export type ParsedHand = z.infer<typeof ParsedHandSchema>;
@@ -51,7 +59,8 @@ export const HandAnalysisSchema = z.object({
     })).default([]),
     betterLine: z.string().optional(),
     exploitSuggestion: z.string().optional(),
-    summary: z.string().optional()
+    summary: z.string().optional(),
+    notesCreated: z.array(z.string()).optional()
 });
 
 export type HandAnalysis = z.infer<typeof HandAnalysisSchema>;

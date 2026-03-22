@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { PlayerController } from '../controllers/PlayerController';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
-import { checkUsageQuota } from '../middleware/usageMiddleware';
 
 const router = Router();
 const controller = new PlayerController();
@@ -42,10 +41,9 @@ router.delete(
     asyncErrorWrapper((req, res) => controller.delete(req, res))
 );
 
-// Trigger re-analysis/aggregation (quota-gated because it uses LLM)
+// Trigger re-analysis/aggregation (quota-gated by controller logic)
 router.post(
     '/profile/refresh',
-    checkUsageQuota('AI_ANALYZE'), // Re-profiling uses LLM tokens
     asyncErrorWrapper((req, res) => controller.refreshProfile(req, res))
 );
 

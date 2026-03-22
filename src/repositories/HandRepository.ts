@@ -31,7 +31,7 @@ export class HandRepository {
             } as any;
         }
 
-        if (options?.minPot) {
+        if (options?.minPot !== undefined) {
             where.parsed_data = {
                 path: ['pot'],
                 gte: options.minPot

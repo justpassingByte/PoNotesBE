@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { ProfileAggregator } from '../services/analysis/ProfileAggregator';
 import { playerCache, clearPlayerCache, clearDashboardCache } from '../lib/cache';
+import { UsageService } from '../services/usageService';
+import { UsageActionType } from '@prisma/client';
 
 export class PlayerController {
     /**
@@ -132,31 +134,49 @@ export class PlayerController {
         }
 
         try {
+            const userId = (req as any).user.id;
+            const tier = (req as any).user.premium_tier || 'FREE';
+
             // Find player
             let player = await prisma.player.findFirst({
                 where: { 
-                    user_id: (req as any).user.id,
+                    user_id: userId,
                     platform_id: platformId as string, 
                     name: name as string 
                 },
-                include: { notes: { where: { user_id: (req as any).user.id } }, stats: true }
+                include: { notes: { where: { user_id: userId } }, stats: true }
             });
 
             if (!player) {
                 return res.status(404).json({ success: false, error: 'Player not found' });
             }
 
-            // Always recalculate profile if notes exist but no profile is present, 
-            // or if force refresh is requested
+            // Check usage if we need to generate/refresh
             const force = req.query.force === 'true';
+            let usage = await UsageService.checkQuota(userId, UsageActionType.AI_ANALYZE, tier);
+
             if (!player.ai_profile || force) {
+                if (!usage.allowed) {
+                    return res.status(403).json({ 
+                        success: false, 
+                        error: 'Monthly/Daily AI quota exceeded', 
+                        usage: { ...usage, resetsAt: usage.resetsAt.toISOString() }
+                    });
+                }
+
                 const newProfile = await ProfileAggregator.generateProfile(player.id);
-                player = { ...player, ai_profile: newProfile as any };
+                if (newProfile) {
+                    await UsageService.incrementUsage(userId, UsageActionType.AI_ANALYZE, tier);
+                    // Refresh usage info after increment
+                    usage = await UsageService.checkQuota(userId, UsageActionType.AI_ANALYZE, tier);
+                    player = { ...player, ai_profile: newProfile as any };
+                }
             }
 
             res.json({
                 success: true,
-                data: player
+                data: player,
+                usage: usage ? { ...usage, resetsAt: usage.resetsAt.toISOString() } : undefined
             });
         } catch (error) {
             console.error('[PlayerController] Error:', error);
@@ -172,8 +192,25 @@ export class PlayerController {
         if (!playerId) return res.status(400).json({ success: false, error: 'Player ID required' });
 
         try {
+            const userId = (req as any).user.id;
+            const tier = (req as any).user.premium_tier || 'FREE';
+
+            const usage = await UsageService.checkQuota(userId, UsageActionType.AI_ANALYZE, tier);
+            if (!usage.allowed) {
+                return res.status(403).json({ success: false, error: 'AI limit reached', usage: { ...usage, resetsAt: usage.resetsAt.toISOString() } });
+            }
+
             const profile = await ProfileAggregator.generateProfile(playerId);
-            res.json({ success: true, data: profile });
+            if (profile) {
+                await UsageService.incrementUsage(userId, UsageActionType.AI_ANALYZE, tier);
+            }
+            
+            const updatedUsage = await UsageService.checkQuota(userId, UsageActionType.AI_ANALYZE, tier);
+            res.json({ 
+                success: true, 
+                data: profile, 
+                usage: { ...updatedUsage, resetsAt: updatedUsage.resetsAt.toISOString() }
+            });
         } catch (error) {
             res.status(500).json({ success: false, error: 'Failed to refresh profile' });
         }
