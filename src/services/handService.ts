@@ -223,8 +223,12 @@ export class HandService {
         const groqKey = process.env.GROQ_API_KEY;
         const aiConfig = userId ? await prisma.userAIConfig.findUnique({ where: { user_id: userId } }) : null;
         
-        const modelName = aiConfig?.model_name || getModelForTier(tier);
-        const isChatGPT = modelName.startsWith('gpt-');
+        const modelInfo = (aiConfig?.model_name && typeof aiConfig.model_name === 'string')
+            ? { model: aiConfig.model_name, provider: aiConfig.model_name.startsWith('gpt-') ? 'openai' : 'openai' as any } // Default to openai for custom models for now
+            : getModelForTier(tier);
+            
+        const modelName = modelInfo.model;
+        const isChatGPT = modelInfo.provider === 'openai' || modelName.startsWith('gpt-');
         
         const client = new OpenAI({
             apiKey: isChatGPT ? process.env.OPENAI_API_KEY : groqKey || '',

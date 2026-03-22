@@ -7,7 +7,7 @@ import { UsageService } from './src/services/usageService';
 const mockRepo = {} as any;
 const mockUsage = {} as any;
 
-const service = new HandService(mockRepo, mockUsage);
+const service = new HandService(mockRepo);
 
 async function testDataExtraction() {
     console.log("--- Testing OCR Data Extraction Logic ---");
