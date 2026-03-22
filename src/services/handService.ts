@@ -364,15 +364,33 @@ export class HandService {
         // Fetch Custom Prompt if userId provided
         let customAnalysisPrompt = undefined;
         let aiConfig = null;
+        let playerContext = undefined;
+        
         if (userId) {
             aiConfig = await prisma.userAIConfig.findUnique({
                 where: { user_id: userId }
             });
             
             customAnalysisPrompt = aiConfig?.analysis_prompt || undefined;
+
+            // CONSISTENCY MEMORY: Fetch existing profiles for context
+            const playerNames = (parsedData as any)?.players?.map((p: any) => p.name) || [];
+            if (playerNames.length > 0) {
+                const profiles = await prisma.player.findMany({
+                    where: {
+                        user_id: userId,
+                        name: { in: playerNames }
+                    }
+                });
+                if (profiles.length > 0) {
+                    playerContext = profiles.map(p => 
+                        `- ${p.name}: [ARCHETYPE: ${p.ai_playstyle || 'UNKNOWN'}] (AGGR: ${p.aggression_score}, LOOSE: ${p.looseness_score})`
+                    ).join('\n');
+                }
+            }
         }
 
-        const prompt = buildHandAnalysisPrompt(customAnalysisPrompt);
+        const prompt = buildHandAnalysisPrompt(customAnalysisPrompt, aiConfig as any, playerContext);
         const payload = JSON.stringify(parsedData, null, 2);
 
         // 1. RUN DETERMINISTIC RULE ENGINE FIRST (Ground Truth)
@@ -385,10 +403,9 @@ export class HandService {
             console.error('[HandAnalysis] Rule Engine Error (skipping to pure AI):', ruleErr);
         }
 
-        // Bug #13 Fix: Respect is_enabled flag (Move here to use ruleEngineResult fallback)
         if (userId && aiConfig && aiConfig.is_enabled === false) {
             console.log(`[HandAnalysis] AI is disabled for user ${userId}. Skipping LLM analysis.`);
-            if (ruleEngineResult) return ruleEngineResult as any;
+            if (ruleEngineResult) return this.mapRuleEngineToHandAnalysis(ruleEngineResult);
             throw new Error('AI Analysis is disabled in your settings.');
         }
 
@@ -446,14 +463,14 @@ If the Rule Engine says it's a mistake, analyze it as such. Do NOT contradict th
                 return JSON.parse(responseText);
             } catch (err: any) {
                 console.error('[HandAnalysis] Groq Error (falling back to Mocking Rule Results):', err.message);
-                if (ruleEngineResult) return ruleEngineResult as any;
+                if (ruleEngineResult) return this.mapRuleEngineToHandAnalysis(ruleEngineResult);
             }
         }
 
         // 3. RULE ENGINE FALLBACK (If pure Groq fails or no key)
         if (ruleEngineResult) {
             console.warn('[HandAnalysis] AI failed — returning deterministic Rule Engine results.');
-            return ruleEngineResult as any;
+            return this.mapRuleEngineToHandAnalysis(ruleEngineResult);
         }
 
         // 4. MOCK FALLBACK (Complete failure)
@@ -499,32 +516,55 @@ If the Rule Engine says it's a mistake, analyze it as such. Do NOT contradict th
         };
     }
 
+    private mapRuleEngineToHandAnalysis(result: any): any {
+        const mistakes = [
+            ...(result.heroMistakes || []).map((m: any) => ({ ...m, player: 'Hero' })),
+            ...(result.villainMistakes || []).map((m: any) => ({ ...m, player: m.playerName || 'Opponent' }))
+        ];
+
+        return {
+            summary: result.summary,
+            reasoning_trace: [
+                "Deterministic Rule Engine started.",
+                `Analyzed ${result.tags?.join(', ') || 'base'} situation.`,
+                "Applied objective poker heuristics."
+            ],
+            mistakes,
+            exploit_suggestions: result.exploitSuggestion ? [result.exploitSuggestion] : [],
+            final_verdict: {
+                grade: mistakes.length > 2 ? 'C' : 'A',
+                confidence_score: 1.0, // Rules are 100% deterministic
+                suggestion_type: 'GTO'
+            }
+        };
+    }
+
     private getMockAnalysis(): HandAnalysis {
         return {
-            heroMistakes: [
-                {
-                    street: 'preflop',
-                    description: 'Flatting with 66 on the BTN after CO limp is fine, but the 3-bet sizing to 111 BB is too large. A smaller 3-bet (65-75 BB) keeps more of villain\'s calling range in.',
-                    severity: 'moderate'
-                }
+            summary: "Set-over-set cooler. Hero failed to fold bottom set on a K-high board where opponent sizing indicated extreme strength.",
+            reasoning_trace: [
+                "Board texture is dynamic with high set-over-set probability.",
+                "Villain sizing on river (150% pot) indicates pure value polarized range.",
+                "Hero has bottom possible set (66), losing to 99 and KK.",
+                "Conclusion: Standard GTO fold vs overbet."
             ],
-            villainMistakes: [
+            mistakes: [
                 {
                     street: 'river',
-                    playerName: 'Vipbka1',
-                    description: 'Calling river with bottom set (66) when the board runs out K-high with a possible higher set (99) is a significant mistake. The bet sizing screams value; folding is preferred.',
+                    player: 'Hero',
+                    description: 'Calling river with bottom set (66) when the board runs out K-high is a significant mistake vs this sizing.',
+                    better_line: 'Fold to river overbet',
                     severity: 'critical'
-                },
-                {
-                    street: 'turn',
-                    playerName: 'Vipbka1',
-                    description: 'Betting 233 BB into a pot of ~113 BB on the turn is an overbet that only gets called by better hands. This is a classic "reverse implied odds" mistake.',
-                    severity: 'moderate'
                 }
             ],
-            betterLine: 'Hero (Vipbka1) should check-call turn with bottom set instead of overbetting. On the river, after facing a large bet, folding set-over-set situations is correct GTO play at these stack depths.',
-            exploitSuggestion: 'kiukiukiu902 shows willingness to slow-play strong hands (limped 99 preflop). Against this player: value bet thinner on safe boards, and avoid bluffing on paired or monotone boards.',
-            summary: 'A classic set-over-set cooler. kiukiukiu902 (99) flopped top set and extracted maximum value. Vipbka1 (66) made a critical error by overbetting turn and calling a massive river bet with the worst possible set.'
+            exploit_suggestions: [
+                "Target kiukiukiu902's willingness to slow-play 3-bet sets by betting smaller on flops."
+            ],
+            final_verdict: {
+                grade: 'C+',
+                confidence_score: 0.88,
+                suggestion_type: 'GTO'
+            }
         };
     }
 

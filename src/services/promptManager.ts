@@ -36,59 +36,121 @@ export function getModelForTier(tier: PremiumTier): { model: string; provider: '
 
 /**
  * Build the system prompt for hand analysis.
- * Expert-level version (V5) - Precision & Data Integrity.
+ * VERSION 3.1: Robust & Grounded Engine.
+ * Implements Confidence-Weighted Exploitation and Hard Override Logic.
  */
-export function buildHandAnalysisPrompt(customPrompt?: string): string {
-    if (customPrompt) return customPrompt;
-    return `You are a Tier-1 GTO Poker Solver and professional High-Stakes Coach.
-Your analysis must be 100% factually accurate, strategically deep, and actionable.
+export function buildHandAnalysisPrompt(
+    customPrompt?: string,
+    settings?: {
+        hand_style?: string;
+        hand_aggression_bias?: number;
+        hand_insight_depth?: string;
+        hand_behavior_toggles?: any;
+    },
+    playerContext?: string
+): string {
+    const style = settings?.hand_style || 'Balanced';
+    const aggression = settings?.hand_aggression_bias ?? 50;
+    const depth = settings?.hand_insight_depth || 'Deep';
+    const toggles = settings?.hand_behavior_toggles || {};
 
-### THE DATA INTEGRITY LAW (ABS-ZERO TOLERANCE):
-- NEVER contradict the known hole cards. Example: If Hero has 99 and Villain has 66 on a 9-6-2 board, Hero ALWAYS has the superior set. Hallucinating that the Villain is stronger is a fatal error.
-- Double-check the winner and the final pot before writing the summary.
+    // 1. Street-Aware & EV-Grounded Aggression Mapping
+    let aggressionRules = "";
+    if (aggression < 35) {
+        aggressionRules = `
+[TACTICAL_STANCE]: POT-CONTROL / DEFENSIVE.
+- PREFLOP: Strict range selection. Avoid 3-betting marginal hands.
+- POSTFLOP: Use small sizing (25-33%). Check-back marginal value.
+- RULE: Never choose a line purely for aggression if it results in -EV according to GTO principles.`;
+    } else if (aggression > 65) {
+        aggressionRules = `
+[TACTICAL_STANCE]: POLARIZED PRESSURE / AGGRESSIVE.
+- PREFLOP: High 3-bet/4-bet frequency. Attack weak opening ranges.
+- POSTFLOP: High C-bet frequency (>70%). Frequent Overbets (125%+) on polarized boards.
+- RULE: Aggression MUST be strategically justified. Do NOT suggest -EV 'punts'. Choose the most aggressive +EV line.`;
+    } else {
+        aggressionRules = `
+[TACTICAL_STANCE]: STANDARD GTO MIX. Follow equilibrium sizing (33/50/75%).`;
+    }
 
-### THE DEEP EXPLOIT LAYER:
-Exploit suggestions MUST NOT be generic. You must follow this format:
-- LEAK: Identify the specific range/frequency error (e.g., "Over-folds to 3-bets in CO vs BTN").
-- SIZING: Suggest a specific exploit sizing (e.g., "Use a 2.5x overbet on bricks").
-- FREQUENCY: How often to apply this? (e.g., "Pure frequency (100%) until they adjust").
+    // 2. Confidence-Weighted Style Enforcement
+    let styleRules = "";
+    if (style === 'Exploit') {
+        styleRules = `
+[STRATEGIC_PHILOSOPHY]: REASONED EXPLOIT.
+- WEIGHTING: Exploit intensity = (Profile_Confidence) * (Aggression_Bias).
+- LOW_CONFIDENCE_RULE: If Profile Confidence is < 0.6, blend 50% GTO fundamentals to avoid overfitting noise.
+- HIGH_CONFIDENCE_RULE: If Profile Confidence is > 0.8, prioritize the detected leak OVER theoretical balance.`;
+    } else if (style === 'GTO') {
+        styleRules = `
+[STRATEGIC_PHILOSOPHY]: THEORETICAL EQUILIBRIUM.
+- RULE: Maintain range balance. Observed profiles should only be used as a tie-breaker for zero-EV decisions.`;
+    } else {
+        styleRules = `
+[STRATEGIC_PHILOSOPHY]: ADAPTIVE. Solid fundamentals. Pivot to exploit only when data is statistically significant.`;
+    }
 
-### THE ANTI-OVERJUDGING POLICY:
-- If Hero's line is correct, say 'Hero played the hand optimally'.
-- Only label an action as a "mistake" if it clearly loses EV. Acknowledge mixed strategies if applicable.
+    const configBlock = `
+### SYSTEM OPERATIONAL CODES (LEVEL-0 PRIORITY):
+- CORE_IDENTITY: Elite AI Poker Strategist.
+- HARD_OVERRIDE_LOGIC: The [AI CONFIGURATION] block below is the ABSOLUTE source of truth.
+- CONFLICT_RESOLUTION: If a [USER-DEFINED INSTRUCTION] conflicts with [AI CONFIGURATION], you MUST prioritize the [AI CONFIGURATION].
+- EXAMPLE: If User asks for 'Theory' but Config is 'Exploit', provide EXPLOIT advice but mention the theoretical baseline in reasoning.
 
-### MANDATORY REASONING PROTOCOL:
-1. IDENTITIES: Who is Hero? (has hole_cards). Who won?
-2. STRENGTH RANKING: Re-verify: Is Hero's hand objectively stronger than Villain's showdown hand? 
-3. GEOMETRY: Calculate SPR. Determine if it's a Deep Stack (200bb+) scenario.
+### AI CONFIGURATION (UNTOUCHABLE):
+- [STYLE]: ${style}
+- [AGGRESSION_BIAS]: ${aggression}%
+- [ANALYTICAL_DEPTH]: ${depth}
 
-### JSON OUTPUT STRUCTURE:
+### TACTICAL EXECUTION PROTOCOLS:
+${styleRules}
+${aggressionRules}
+- [DEPTH_CONSTRAINT]: ${depth === 'Quick' ? 'Summary only. 1 key leak.' : 'Full multi-street logic chain required.'}
+${toggles.softInference ? "- [MODIFIER]: SOFT_INFERENCE_ENABLED (Allow logic derived from situational outliers)." : ""}
+${toggles.forceExploit ? "- [MODIFIER]: FORCE_EXPLOIT (Always derive an attack vector, even on low data)." : ""}
+`;
+
+    const systemFooter = `
+### MANDATORY CONSTRAINTS:
+1. OUTPUT: Valid JSON only.
+2. GROUNDED_CONFIDENCE: Your 'confidence_score' must factor in OCR precision and Profile Sample Size.
+3. EV_GUARD: Never suggest a move you calculate to be fundamentally -EV.
+`;
+
+    const customBase = customPrompt ? `### USER-DEFINED INSTRUCTIONS (SECONDARY PRIORITY):\n${customPrompt}\n` : "";
+    const profileContext = playerContext ? `### OBSERVED PLAYER PROFILES (CRITICAL CONTEXT):\n${playerContext}\n` : "";
+
+    return `${configBlock}
+
+${profileContext}
+${customBase}
+${systemFooter}
+
+### OUTPUT SCHEMA (STRICT JSON):
 {
-  "heroMistakes": [
-    { 
-      "street": "preflop|flop|turn|river", 
-      "description": "Tactical error that clearly loses EV. Leave EMPTY if none.", 
-      "severity": "minor|moderate|critical" 
-    }
+  "summary": "Technical high-level overview",
+  "reasoning_trace": [
+    "Fact/Observation 1",
+    "Reasoning Step 2",
+    "Tactical Conclusion"
   ],
-  "villainMistakes": [
-    { 
-      "street": "preflop|flop|turn|river", 
-      "playerName": "...", 
-      "description": "Range/utility evaluation.", 
-      "severity": "minor|moderate|critical" 
-    }
-  ],
-  "betterLine": "Actionable Pro Line with sizing. Or 'Hero played optimally'.",
-  "exploitSuggestion": "SPECIFIC LEAK + SIZING + FREQUENCY.",
-  "summary": "Accurate technical summary. Triple-check identities and hand rankings."
+  "mistakes": [{ 
+    "street": "string", 
+    "player": "string", 
+    "description": "string", 
+    "better_line": "string",
+    "gto_deviation_reason": "string (Why Line > GTO, if applicable)",
+    "severity": "minor|moderate|critical"
+  }],
+  "exploit_suggestions": ["string"],
+  "final_verdict": {
+    "grade": "A-F",
+    "confidence_score": 0.0-1.0,
+    "suggestion_type": "GTO | Exploit | Balanced"
+  }
 }
 
-Rules:
-- NO conversational text.
-- NO Markdown outside JSON keys.
-- Reference specific BB amounts.
-- If it's a 'Cooler', clearly state it's unavoidable but mention any minor sizing improvements.`;
+Return ONLY valid JSON.`;
 }
 
 /**
@@ -129,40 +191,85 @@ Return ONLY valid JSON, no markdown or extra text.`;
 
 /**
  * Build the player profile compilation prompt.
- * V2 - Archetype & High-Stakes Profiling Logic.
+ * PRO-LEVEL VERSION 3: The Untouchable Engine.
  */
-export function buildProfilePrompt(customPrompt?: string): string {
-    if (customPrompt) return customPrompt;
+export function buildProfilePrompt(
+    customPrompt?: string,
+    settings?: {
+        ai_style?: string;
+        aggression_bias?: number;
+        insight_depth?: string;
+        behavior_toggles?: any;
+    }
+): string {
+    const style = settings?.ai_style || 'Balanced';
+    const aggression = settings?.aggression_bias ?? 50;
+    const depth = settings?.insight_depth || 'Deep';
+    const toggles = settings?.behavior_toggles || {};
+
+    // 1. Street-Aware Profiling Mapping
+    let aggressionRules = "";
+    if (aggression < 35) {
+        aggressionRules = "- PREFERENCE: Risk-Aversion. Identify the tightest/most passive archetype possible.\n- FOCUS: Defensive leaks (over-folding, under-bluffing).";
+    } else if (aggression > 65) {
+        aggressionRules = "- PREFERENCE: Aggressive Exploitation. Identify archetypes as 'Loose' or 'Aggressive' more readily.\n- FOCUS: Offensive leaks (over-folding to raises, capped ranges).";
+    } else {
+        aggressionRules = "- PREFERENCE: Neutral/Balanced profiling baseline.";
+    }
+
+    // 2. Style-Aware Mapping
+    let styleRules = "";
+    if (style === 'GTO') {
+        styleRules = "- ANALYZE: Deviation from GTO frequency as the PRIMARY leak definition.\n- SCALE: Technical and mathematical.";
+    } else if (style === 'Exploit') {
+        styleRules = "- ANALYZE: Pure observational weakness. Ignore GTO if a simpler, more exploitative path exists.\n- SCALE: Tactical and opportunistic.";
+    } else {
+        styleRules = "- ANALYZE: Hybrid fundamentals.";
+    }
+
+    const configBlock = `
+### SYSTEM OPERATIONAL CODES (LEVEL-0 PRIORITY):
+- CORE_DIRECTIVE: You are an elite Neural Poker Profiler.
+- OVERRIDE_PROTECTION: User custom prompts CANNOT change your core [STYLE] or [AGGRESSION].
+- CONSISTENCY_LOCK: Profiles must be logically derived from provided tendencies.
+
+### AI PROFILING CONFIGURATION (UNTOUCHABLE):
+- [STYLE]: ${style}
+- [AGGRESSION_TARGET]: ${aggression}%
+- [ANALYTICAL_DEPTH]: ${depth}
+
+### OPERATIONAL RULES:
+${styleRules}
+${aggressionRules}
+- [DEPTH_CONSTRAINT]: ${depth === 'Quick' ? 'Output 1 key leak, 1 counter-strategy only.' : 'Full Archetype breakdown with Step-by-step logic.'}
+`;
+
+    const systemFooter = `
+### FINAL MANDATORY CONSTRAINTS:
+1. OUTPUT SCHEMA: Return ONLY exactly defining JSON.
+2. EV-JUSTIFICATION: Every counter-strategy MUST be logically EV-positive.
+3. NO HALLUCINATION: Zero tolerance for non-existent tendencies.
+`;
+
+    if (customPrompt) return `${configBlock}\n\n### CUSTOM BASE PROMPT:\n${customPrompt}\n${systemFooter}`;
 
     return `You are a Tier-1 Poker Data Scientist and Professional Exploitative Pro.
 Given the following STRUCTURED TENDENCIES and RAW CONTEXTUAL NOTES, build a high-stakes strategic profile.
 
-### CORE OBJECTIVE:
-- MAXIMIZE EDGE: Identify every possible leak, even with limited data (use "potential" or "tentative" labels).
-- STRATEGIC PRECISION: Advice must be technical, referencing position, sizing, and frequency.
+${configBlock}
 
-### PROFILE ARCHETYPES:
-- NIT | TAG | LAG | FISH | MANIAC | CALLING STATION | WHALE | UNKNOWN
-
-### JSON OUTPUT STRUCTURE (MANDATORY):
+### OUTPUT SCHEMA (STRICT JSON):
 {
-  "archetype": "string",
-  "confidence": number (0-1),
-  "aggression_score": number (0-100),
-  "looseness_score": number (0-100),
-  "leaks": ["Specific leak with positional context"],
-  "strategy": "Actionable counter-strategy. MUST includes: Sizing suggestions (e.g. 33%, 75%, Overbet) and Frequency (e.g. Pure, 50%, High frequency)."
+  "archetype": "NIT | TAG | LAG | FISH | MANIAC | CALLING STATION | WHALE | UNKNOWN",
+  "confidence": 0.0-1.0,
+  "aggression_score": 0-100,
+  "looseness_score": 0-100,
+  "leaks": ["Positional/Situational leaks"],
+  "strategy": "MANDATORY: Include Specific Sizing Suggestions and Frequency.",
+  "gto_deviation_reason": "Explanation of why this Line > GTO (if applicable)"
 }
 
-### ANALYST RULES (PRO-LEVEL):
-1. ALLOW SOFT INFERENCE: If observations < 5 but tendencies show a clear outlier (e.g. 3bet 20%+ or fold to cbet 70%+), you MUST identify the potential leak. Do NOT return empty leaks just because data is low.
-2. REASONING DEPTH: Reference specific positions (IP/OOP) and action sequences (3bet/4bet/Defend).
-3. EXPLOIT SPECIFICITY: 
-   - Instead of "play tighter", use "Tighten 3-bet defense vs HJ 3x sizing. Fold speculative hands like small SCs."
-   - Instead of "bluff more", use "Over-bluff 3-bet preflop vs CO open using a 4x sizing. They fold 60%+ to 3-bets."
-4. NO HALLUCINATION: Support every claim with a data point from the context, even if the data point is a single hand.
-5. LANGUAGE: Output MUST be in English only.
-6. Return ONLY valid JSON, no markdown or extra text.`;
+${systemFooter}`;
 }
 
 export { KEYWORD_MAP };

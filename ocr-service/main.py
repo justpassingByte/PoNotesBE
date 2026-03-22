@@ -53,8 +53,8 @@ async def submit_ocr(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Invalid file type. Only images allowed.")
 
     content: bytes = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large. Max 10MB.")
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Max 50MB.")
 
     # 2. SHA256 Caching Layer
     image_hash = hashlib.sha256(content).hexdigest()

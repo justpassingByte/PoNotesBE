@@ -24,7 +24,23 @@ export class SettingsController {
                     analysis_prompt: "", // Default to empty (uses promptManager one)
                     model_name: 'llama-3.3-70b-versatile',
                     temperature: 0.7,
-                    is_enabled: true
+                    is_enabled: true,
+                    ai_style: 'Balanced',
+                    aggression_bias: 50,
+                    insight_depth: 'Deep',
+                    behavior_toggles: {
+                        softInference: true,
+                        forceExploit: false,
+                        highlightLeaks: true
+                    },
+                    hand_style: 'Balanced',
+                    hand_aggression_bias: 50,
+                    hand_insight_depth: 'Deep',
+                    hand_behavior_toggles: {
+                        softInference: true,
+                        forceExploit: false,
+                        highlightLeaks: true
+                    }
                 }
             });
         }
@@ -37,7 +53,21 @@ export class SettingsController {
      */
     static updateAISettings = asyncErrorWrapper(async (req: Request, res: Response) => {
         const userId = (req as any).user.id;
-        const { system_prompt, analysis_prompt, model_name, temperature, is_enabled } = req.body;
+        const { 
+            system_prompt, 
+            analysis_prompt, 
+            model_name, 
+            temperature, 
+            is_enabled,
+            ai_style,
+            aggression_bias,
+            insight_depth,
+            behavior_toggles,
+            hand_style,
+            hand_aggression_bias,
+            hand_insight_depth,
+            hand_behavior_toggles
+        } = req.body;
 
         const config = await prisma.userAIConfig.upsert({
             where: { user_id: userId },
@@ -47,14 +77,38 @@ export class SettingsController {
                 analysis_prompt,
                 model_name,
                 temperature: temperature ?? 0.7,
-                is_enabled: is_enabled ?? true
+                is_enabled: is_enabled ?? true,
+                ai_style: ai_style ?? 'Balanced',
+                aggression_bias: aggression_bias ?? 50,
+                insight_depth: insight_depth ?? 'Deep',
+                behavior_toggles: behavior_toggles ?? {
+                    softInference: true,
+                    forceExploit: false,
+                    highlightLeaks: true
+                },
+                hand_style: hand_style ?? 'Balanced',
+                hand_aggression_bias: hand_aggression_bias ?? 50,
+                hand_insight_depth: hand_insight_depth ?? 'Deep',
+                hand_behavior_toggles: hand_behavior_toggles ?? {
+                    softInference: true,
+                    forceExploit: false,
+                    highlightLeaks: true
+                }
             },
             update: {
                 system_prompt,
                 analysis_prompt,
                 model_name,
                 temperature,
-                is_enabled
+                is_enabled,
+                ai_style,
+                aggression_bias,
+                insight_depth,
+                behavior_toggles,
+                hand_style,
+                hand_aggression_bias,
+                hand_insight_depth,
+                hand_behavior_toggles
             }
         });
 

@@ -78,12 +78,19 @@ async function main() {
     console.log('Created/Updated pricing plans.');
 
     // 1. Create Platforms
-    const platforms = ['WPT Poker', 'GG Poker', 'PokerStars', '888Poker', 'CoinPoker'];
-    for (const p of platforms) {
-        await prisma.platform.upsert({
-            where: { name: p },
-            update: {},
-            create: { name: p },
+    const platformsData = [
+        { id: '989c631c-8347-46d6-8b94-02539b143c26', name: 'WPT Poker' },
+        { id: '1169f3ef-783f-4dd2-a715-931d140ce3c4', name: 'GG Poker' },
+        { name: 'PokerStars' },
+        { name: '888Poker' },
+        { name: 'CoinPoker' }
+    ];
+
+    for (const p of platformsData) {
+        await (prisma.platform as any).upsert({
+            where: { name: p.name },
+            update: p,
+            create: p,
         });
     }
 

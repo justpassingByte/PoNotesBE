@@ -45,21 +45,32 @@ export type HandAction = z.infer<typeof HandActionSchema>;
 /**
  * Zod schema for the AI analysis output.
  */
+/**
+ * Zod schema for the AI analysis output (Version 3).
+ */
 export const HandAnalysisSchema = z.object({
-    heroMistakes: z.array(z.object({
+    summary: z.string().optional(),
+    reasoning_trace: z.array(z.string()).default([]),
+    mistakes: z.array(z.object({
         street: z.string(),
+        player: z.string(),
         description: z.string(),
+        better_line: z.string().optional(),
+        gto_deviation_reason: z.string().optional(),
         severity: z.enum(['minor', 'moderate', 'critical']).optional()
     })).default([]),
-    villainMistakes: z.array(z.object({
-        street: z.string(),
-        playerName: z.string().optional(),
-        description: z.string(),
-        severity: z.enum(['minor', 'moderate', 'critical']).optional()
-    })).default([]),
+    exploit_suggestions: z.array(z.string()).default([]),
+    final_verdict: z.object({
+        grade: z.string(),
+        confidence_score: z.number().optional(),
+        suggestion_type: z.enum(['GTO', 'Exploit', 'Balanced']).optional()
+    }).optional(),
+    
+    // Compatibility fields (fallback if needed)
+    heroMistakes: z.array(z.any()).optional(),
+    villainMistakes: z.array(z.any()).optional(),
     betterLine: z.string().optional(),
     exploitSuggestion: z.string().optional(),
-    summary: z.string().optional(),
     notesCreated: z.array(z.string()).optional()
 });
 

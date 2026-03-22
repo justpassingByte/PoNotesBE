@@ -159,7 +159,7 @@ export class ProfileAggregator {
             });
 
             const rawContent = notes.map(n => n.content).join('; ');
-            const prompt = buildProfilePrompt(aiConfig?.system_prompt || undefined);
+            const prompt = buildProfilePrompt(aiConfig?.system_prompt || undefined, aiConfig as any);
             const inputText = `STRUCTURED TENDENCIES: ${JSON.stringify(structuredData, null, 2)}\n\nRAW CONTEXTUAL NOTES: ${rawContent}`;
 
             console.log(`[PlayerProfiling] SYSTEM PROMPT (User: ${player.user_id}):\n${prompt}`);
