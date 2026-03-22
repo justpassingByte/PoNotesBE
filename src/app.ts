@@ -69,8 +69,19 @@ app.get('/health', (req, res) => {
 // API Routes
 // Note: Sub-routes should come BEFORE generic parent routes if overlapping
 
-// Auth routes manage their own public/private balance
+// Auth routes (Self-managed public/private)
 app.use('/api/auth', authRoutes);
+
+// Public Pricing Route (Keep this ABOVE authMiddleware)
+app.get('/api/admin/pricing/public', async (req, res, next) => {
+    try {
+        const { prisma } = require('./lib/prisma');
+        const plans = await prisma.pricingPlan.findMany({ orderBy: { price: 'asc' } });
+        res.json({ success: true, data: plans });
+    } catch (error) {
+        next(error);
+    }
+});
 
 // All other /api routes require authentication
 app.use('/api', authMiddleware);
