@@ -100,6 +100,16 @@ export class NowPaymentsService {
      * Used for race condition retry logic and the status polling endpoint.
      */
     /**
+     * Fetch all payments for a given internal order ID.
+     * Most reliable way to find associated payments in Sandbox and Production.
+     */
+    async getPaymentsByOrderId(orderId: string): Promise<any> {
+        return this.withRetry(() =>
+            this.client.get(`/payment`, { params: { order_id: orderId } }).then(r => r.data)
+        );
+    }
+
+    /**
      * Fetch the current status of a HOSTED INVOICE created via /invoice.
      * Returns the full invoice object including 'status' and 'payment_id' if available.
      */
