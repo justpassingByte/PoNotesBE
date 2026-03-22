@@ -80,6 +80,9 @@ def process_hand(image_hex: str, image_hash: str):
     Main OCR processing task with hybrid validation pipeline.
     Returns structured hand data + confidence breakdown.
     """
+    # ── HOTFIX: Always reload global templates so we don't use stale worker memory ──
+    card_detector._load_templates()
+    
     start_time = time.time()
     try:
         # 1. Decode Image (Handle both Hex and Base64/DataURL)

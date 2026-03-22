@@ -8,11 +8,11 @@ import { getModelForTier, buildHandAnalysisPrompt } from './promptManager';
 import { PremiumTier, UsageActionType } from '@prisma/client';
 import { LoggerService, LogType } from './loggerService';
 import OpenAI from 'openai';
-
+import { PatternEngine } from './analysis/PatternEngine';
 export class HandService {
     constructor(
         private readonly handRepository: HandRepository
-    ) {}
+    ) { }
 
     async parseHand(params: {
         userId: string;
@@ -21,17 +21,17 @@ export class HandService {
         tier: PremiumTier;
     }): Promise<{ hand: any; fromCache: boolean }> {
         const hashInput = `${params.userId}:${params.rawInput}`;
-        const hash = params.inputType === 'text' 
+        const hash = params.inputType === 'text'
             ? generateHandHash(hashInput)
             : crypto.createHash('sha256').update(hashInput).digest('hex');
 
         // Check for existing hand to log repeat processing
         const existingHand = await prisma.hand.findUnique({ where: { hand_hash: hash } });
-        
+
         if (existingHand) {
             await LoggerService.log(
-                params.userId, 
-                LogType.SYSTEM, 
+                params.userId,
+                LogType.SYSTEM,
                 `Hand re-upload detected (hash match). Clearing previous analysis for re-learning.`,
                 { hash: hash.slice(0, 16) },
                 existingHand.id
@@ -49,7 +49,7 @@ export class HandService {
         if (params.inputType === 'image') {
             const ocrResponse = await this.ocrParseImage(params.rawInput, params.tier);
             parsedData = ocrResponse.data;
-            
+
             (parsedData as any).ocr_result = {
                 confidence: ocrResponse.confidence?.total ?? 0,
                 decision: ocrResponse.decision,
@@ -58,7 +58,7 @@ export class HandService {
                 breakdown: ocrResponse.confidence?.breakdown,
                 performance: ocrResponse.performance
             };
-            
+
             await UsageService.incrementUsage(params.userId, UsageActionType.OCR_HAND, params.tier);
         } else {
             parsedData = this.parseTextHand(params.rawInput);
@@ -69,7 +69,7 @@ export class HandService {
             where: { hand_hash: hash },
             update: {
                 parsed_data: parsedData as any,
-                ai_analysis: null as any, 
+                ai_analysis: null as any,
                 created_at: new Date()
             },
             create: {
@@ -96,7 +96,7 @@ export class HandService {
         if (!hand) throw new Error('Hand not found');
 
         const finalParsedData = params.parsedData || (hand.parsed_data as unknown as ParsedHand);
-        
+
         await LoggerService.log(
             params.userId,
             LogType.AI_LEARNING,
@@ -104,6 +104,20 @@ export class HandService {
             { handId: hand.id },
             hand.id
         );
+
+        // Clean up previous AI notes for this hand so re-learning is pure
+        const deletedNotes = await prisma.note.deleteMany({
+            where: { hand_id: params.handId, is_ai_generated: true, user_id: params.userId }
+        });
+        if (deletedNotes.count > 0) {
+            await LoggerService.log(
+                params.userId,
+                LogType.SYSTEM,
+                `Wiped ${deletedNotes.count} previous AI notes for this hand. Ready for a clean re-eval.`,
+                { count: deletedNotes.count },
+                hand.id
+            );
+        }
 
         const analysis = await this.runAnalysis(finalParsedData, params.tier, params.userId);
         await UsageService.incrementUsage(params.userId, UsageActionType.AI_ANALYZE, params.tier);
@@ -137,7 +151,18 @@ export class HandService {
 
     private async autoExtractNotesFromAnalysis(userId: string, hand: any, parsedHand: ParsedHand, analysis: HandAnalysis): Promise<string[]> {
         const villainMistakes = (analysis as any).villainMistakes || analysis.mistakes?.filter(m => m.player.toLowerCase() !== 'hero') || [];
-        if (villainMistakes.length === 0 && !analysis.exploit_suggestions?.length) return [];
+        if (villainMistakes.length === 0 && !analysis.exploit_suggestions?.length) {
+            await LoggerService.log(userId, LogType.SYSTEM, `No actionable villain leaks found in this hand.`, { handId: hand.id }, hand.id);
+            return [];
+        }
+
+        await LoggerService.log(
+            userId, 
+            LogType.AI_LEARNING, 
+            `Extracting ${villainMistakes.length} actionable leaks from AI neural output...`, 
+            { raw_mistakes: villainMistakes.map(m => m.description) }, 
+            hand.id
+        );
 
         const createdNoteIds: string[] = [];
         for (const mistake of villainMistakes) {
@@ -168,7 +193,31 @@ export class HandService {
                 }
             });
             createdNoteIds.push(note.id);
+
+            await LoggerService.log(
+                userId,
+                LogType.PROFILE_EVOLUTION,
+                `Auto-extracted note for [${playerName}] on street [${mistake.street || 'general'}]. Pushing to Memory Engine...`,
+                { noteId: note.id, content: mistake.description },
+                hand.id
+            );
+
+            // CRITICAL: Feed AI-generated notes into the PatternEngine memory loop!
+            try {
+                await PatternEngine.processNote(note);
+            } catch (err) {
+                console.error('[HandService] PatternEngine error during auto extraction:', err);
+            }
         }
+
+        await LoggerService.log(
+            userId,
+            LogType.SYSTEM,
+            `Successfully bridged ${createdNoteIds.length} new insights into the Long-term Memory core.`,
+            { createdNotesCount: createdNoteIds.length },
+            hand.id
+        );
+
         return createdNoteIds;
     }
 
@@ -196,10 +245,15 @@ export class HandService {
             if (!response.ok) throw new Error(`OCR Service Error: ${response.status}`);
 
             const { job_id } = await response.json();
+            console.log(`[OCR_ENGINE] Sent visual payload. Job ID: ${job_id}. Waiting for core...`);
+            
             for (let i = 0; i < 20; i++) {
                 const poll = await fetch(`${ocrServiceUrl}/result/${job_id}`);
                 const data = await poll.json();
-                if (data.status === 'success') return data.result;
+                if (data.status === 'success') {
+                    console.log(`[OCR_ENGINE] Scan Complete (Job: ${job_id}). Confidence: ${data.result.confidence?.total || 0}%. Payload extracted!`);
+                    return data.result;
+                }
                 if (data.status === 'error') throw new Error(data.detail);
                 await new Promise(r => setTimeout(r, 1000));
             }
@@ -211,25 +265,25 @@ export class HandService {
     }
 
     private parseTextHand(rawText: string): ParsedHand {
-        return { 
-            players: [], 
-            board: [], 
-            pot: 0, 
-            actions: { preflop: [], flop: [], turn: [], river: [] } 
+        return {
+            players: [],
+            board: [],
+            pot: 0,
+            actions: { preflop: [], flop: [], turn: [], river: [] }
         };
     }
 
     private async runAnalysis(parsedData: ParsedHand | null, tier: PremiumTier, userId?: string): Promise<HandAnalysis> {
         const groqKey = process.env.GROQ_API_KEY;
         const aiConfig = userId ? await prisma.userAIConfig.findUnique({ where: { user_id: userId } }) : null;
-        
+
         const modelInfo = (aiConfig?.model_name && typeof aiConfig.model_name === 'string')
             ? { model: aiConfig.model_name, provider: aiConfig.model_name.startsWith('gpt-') ? 'openai' : 'openai' as any } // Default to openai for custom models for now
             : getModelForTier(tier);
-            
+
         const modelName = modelInfo.model;
         const isChatGPT = modelName.startsWith('gpt-') || modelName.startsWith('o1-') || modelName.startsWith('o3-');
-        
+
         const client = new OpenAI({
             apiKey: isChatGPT ? process.env.OPENAI_API_KEY : (process.env.GROQ_API_KEY || ''),
             baseURL: isChatGPT ? undefined : 'https://api.groq.com/openai/v1'
@@ -246,6 +300,11 @@ export class HandService {
             response_format: { type: 'json_object' }
         });
 
-        return JSON.parse(response.choices[0]?.message?.content || '{}');
+        const rawJson = response.choices[0]?.message?.content || '{}';
+        
+        // Verbose Logging for Debugging/Learning Loop
+        console.log(`\n[AI_LEARNING_DUMP] Raw Model Output:\n${rawJson}\n`);
+
+        return JSON.parse(rawJson);
     }
 }

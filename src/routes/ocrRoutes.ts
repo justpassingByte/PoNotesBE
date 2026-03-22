@@ -71,14 +71,20 @@ router.post(
                 }
             }
 
+            console.log(`[OCR_NEURAL_TRAIN] Transmitting visual map for '${action}'. Card: [${cardName}] -> [${correctedName || ''}] to Core Vision Engine...`);
+            
             const response = await axios.post(`${OCR_SERVICE_URL}/feedback`, {
                 image_hex:      imageHex,
                 card_name:      cardName,
                 action:         action,
                 corrected_name: correctedName,
             });
+            
+            console.log(`[OCR_NEURAL_TRAIN] Vision Engine acknowledged learning for [${correctedName || cardName}]. Cache Updated.`);
+            
             return res.json({ status: 'ok', result: response.data });
         } catch (err: any) {
+            console.error(`[OCR_NEURAL_TRAIN] Critical failure communicating with Vision Engine:`, err.message);
             return res.status(502).json({ error: 'OCR feedback service unavailable.', details: err.message });
         }
     })
