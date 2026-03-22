@@ -47,7 +47,7 @@ export class PaymentController extends BaseController {
             const { tierRequested } = parseResult.data;
 
             // ─── 3. Get price from database (not hardcoded) ─────────────────
-            const plan = await (prisma as any).pricingPlan.findUnique({
+            const plan = await prisma.pricingPlan.findUnique({
                 where: { id: tierRequested }
             });
 
@@ -55,20 +55,43 @@ export class PaymentController extends BaseController {
                 return res.status(400).json({ success: false, error: `Invalid or unavailable tier: ${tierRequested}` });
             }
 
-            const priceAmount = plan.price;
+            // ─── 4. Check for Proration (Upgrade discount) ─────────────────────
+            const currentUser = await prisma.user.findUnique({
+                where: { id: user.id },
+                select: { premium_tier: true, subscription_expiry: true }
+            });
 
-            // ─── 4. Create internal invoice first (optimistic) ───────────────────
+            let finalAmount = plan.price;
+            let discountApplied = 0;
+
+            // Only prorate if upgrading from a lower paid tier to a higher paid tier
+            if (currentUser?.premium_tier !== 'FREE' && currentUser?.subscription_expiry && currentUser.subscription_expiry > new Date()) {
+                const currentPlan = await prisma.pricingPlan.findUnique({ where: { id: currentUser.premium_tier } });
+                
+                // If requested plan is more expensive than current plan
+                if (currentPlan && plan.price > currentPlan.price) {
+                    const daysRemaining = Math.max(0, (currentUser.subscription_expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                    const dailyValue = currentPlan.price / 30; // Approximation
+                    discountApplied = Math.min(plan.price - 1.0, daysRemaining * dailyValue); // Max discount: leave at least $1
+                    finalAmount = Math.round((plan.price - discountApplied) * 100) / 100; // Round to 2 decimals
+                    
+                    console.log(`[Proration] User ${user.email} upgrading: ${currentUser.premium_tier} -> ${tierRequested}`);
+                    console.log(`[Proration] Days left: ${daysRemaining.toFixed(1)} | Credit: $${discountApplied.toFixed(2)} | Final: $${finalAmount}`);
+                }
+            }
+
+            // ─── 5. Create internal invoice (optimistic) ───────────────────
             const invoice = await prisma.invoice.create({
                 data: {
                     user_id: user.id,
-                    amount: priceAmount,
+                    amount: finalAmount,
                     currency: 'USD',
                     tier_requested: tierRequested as any,
                     status: 'PENDING',
                 }
             });
 
-            // ─── 5. Call NOWPayments API ─────────────────────────────────────────
+            // ─── 6. Call NOWPayments API ─────────────────────────────────────────
             let invoiceUrl = '';
             let nowpayments_id = '';
 
@@ -76,11 +99,11 @@ export class PaymentController extends BaseController {
                 // No API key configured — return stub for development
                 return this.handleSuccess(res, {
                     invoiceId: invoice.id,
-                    amount: priceAmount,
+                    amount: finalAmount,
                     currency: 'USD',
                     tier: tierRequested,
                     invoice_url: null,
-                    message: 'NOWPayments API key not configured. Set NOWPAYMENTS_API_KEY in environment.',
+                    message: `Sandbox Mode: Prorated price $${finalAmount} calculated.`,
                     sandbox: true,
                 }, 201);
             }
@@ -89,26 +112,26 @@ export class PaymentController extends BaseController {
             const success_url = `${frontendUrl}/payment/status/${invoice.id}`;
 
             const externalInvoice = await nowPaymentsService.createInvoice({
-                price_amount: priceAmount,
+                price_amount: finalAmount,
                 price_currency: 'usd',
                 order_id: invoice.id,
-                order_description: `VillainVault ${tierRequested} Plan — 30 days`,
+                order_description: `VillainVault ${tierRequested} Upgrade — 30 days`,
                 success_url: success_url,
                 cancel_url: config.nowpayments.cancelUrl,
                 is_fixed_rate: false,
-                is_fee_paid_by_user: true, // User pays gas/network fees
+                is_fee_paid_by_user: true,
             });
 
             invoiceUrl = externalInvoice.invoice_url;
             nowpayments_id = externalInvoice.id;
 
-            // ─── 6. Persist external IDs ─────────────────────────────────────────
+            // ─── 7. Persist external IDs ─────────────────────────────────────────
             await prisma.invoice.update({
                 where: { id: invoice.id },
                 data: { nowpayments_id }
             });
 
-            // ─── 7. Log creation event ───────────────────────────────────────────
+            // ─── 8. Log creation event ───────────────────────────────────────────
             await prisma.paymentEvent.create({
                 data: {
                     invoice_id: invoice.id,
@@ -116,7 +139,8 @@ export class PaymentController extends BaseController {
                     payload: {
                         nowpayments_id,
                         tier: tierRequested,
-                        amount: priceAmount,
+                        amount: finalAmount,
+                        discount: discountApplied,
                         is_sandbox: config.nowpayments.isSandbox,
                     },
                     processed: true,
@@ -125,11 +149,11 @@ export class PaymentController extends BaseController {
 
             return this.handleSuccess(res, {
                 invoiceId: invoice.id,
-                amount: priceAmount,
+                amount: finalAmount,
                 currency: 'USD',
                 tier: tierRequested,
                 invoice_url: invoiceUrl,
-                notice: 'Network fees may apply depending on your wallet.',
+                notice: discountApplied > 0 ? `Upgrade discount of $${discountApplied.toFixed(2)} applied!` : 'Network fees may apply.',
                 sandbox: config.nowpayments.isSandbox,
             }, 201);
         } catch (error) {
@@ -303,6 +327,22 @@ export class PaymentController extends BaseController {
             });
         } catch (error) {
             this.handleError(error, res, 'PaymentController.getStatus');
+        }
+    }
+
+    /**
+     * GET /api/payments/public-plans
+     * Returns all available pricing plans for the landing page.
+     * Public access permitted.
+     */
+    async getPublicPlans(req: Request, res: Response) {
+        try {
+            const plans = await (prisma as any).pricingPlan.findMany({ 
+                orderBy: { price: 'asc' } 
+            });
+            this.handleSuccess(res, { success: true, data: plans });
+        } catch (error) {
+            this.handleError(error, res, 'PaymentController.getPublicPlans');
         }
     }
 

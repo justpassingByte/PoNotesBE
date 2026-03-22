@@ -62,6 +62,15 @@ router.post(
  * NOWPayments IPN webhook endpoint.
  * Verify signature against standard JSON parsed body.
  */
+/**
+ * GET /api/payments/public-plans
+ * Publicly accessible list of pricing plans for the landing page.
+ */
+router.get(
+    '/public-plans',
+    asyncErrorWrapper((req, res) => controller.getPublicPlans(req, res))
+);
+
 router.post(
     '/webhook',
     webhookLimiter,

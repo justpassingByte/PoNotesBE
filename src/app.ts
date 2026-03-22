@@ -80,16 +80,6 @@ app.use('/api/auth', authRoutes);
 // Payment routes (Self-managed: webhook is public, others are private)
 app.use('/api/payments', paymentRoutes);
 
-// Public Pricing Route (Keep this ABOVE authMiddleware)
-app.get('/api/admin/pricing/public', async (req, res, next) => {
-    try {
-        const { prisma } = require('./lib/prisma');
-        const plans = await prisma.pricingPlan.findMany({ orderBy: { price: 'asc' } });
-        res.json({ success: true, data: plans });
-    } catch (error) {
-        next(error);
-    }
-});
 
 // All other /api routes require authentication
 app.use('/api', authMiddleware);
