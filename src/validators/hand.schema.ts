@@ -54,6 +54,7 @@ export const HandAnalysisSchema = z.object({
     mistakes: z.array(z.object({
         street: z.string(),
         player: z.string(),
+        position: z.string().optional(),
         description: z.string(),
         better_line: z.string().optional(),
         gto_deviation_reason: z.string().optional(),

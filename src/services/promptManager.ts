@@ -110,8 +110,10 @@ ${style === 'Exploit' ? `You are in EXPLOIT mode.
   const systemFooter = `
 ### MANDATORY CONSTRAINTS:
 1. OUTPUT: Valid JSON only.
-2. EXPLOIT_VALIDATION: If an exploit avoids profit instead of extracting it, it is wrong.
-3. SIZING_VALIDATION: Fold/Call actions must have sizing=null.
+2. HERO VS VILLAIN: Identify the 'Hero' (the player with known hole cards or explicitly named 'Hero'). All other players are 'Villains'.
+3. MISSING IDENTITIES: If the JSON has a 'Hero' with hole_cards, but their actions are listed under a real username (e.g. 'PlayerA'), YOU MUST deduce which username is the Hero and evaluate the hand from their perspective.
+4. EXPLOIT_VALIDATION: If an exploit avoids profit instead of extracting it, it is wrong. Your exploit_suggestions MUST be strategies for the Hero to use against the specific Villains' leaks found in this hand.
+5. SIZING_VALIDATION: Fold/Call actions must have sizing=null.
 `;
 
   const customBase = customPrompt ? `### USER-DEFINED INSTRUCTIONS:\n${customPrompt}\n` : "";
@@ -130,6 +132,7 @@ ${systemFooter}
   "mistakes": [{ 
     "street": "string", 
     "player": "string", 
+    "position": "string (Target table position like BTN/SB/BB)",
     "description": "string", 
     "better_line": "string",
     "gto_deviation_reason": "string",
@@ -232,9 +235,9 @@ Convert notes and tendencies into **precise, executable OFFENSIVE exploit strate
 ## ANALYST RULES (MANDATORY)
 
 ### 1. ACTION-TYPE VALIDATION (STRICT)
-- Fold → sizing MUST be null or omitted (Numeric values like "0" are INVALID)
-- Call → sizing MUST be null or omitted (Numeric values like "0" are INVALID)
-- Raise/Bet/3bet/4bet → must include numeric sizing
+- Fold → sizing MUST be strictly null (Do NOT invent "0" or "0x")
+- Call → sizing MUST be strictly null (Do NOT invent "0" or "0x")
+- Raise/Bet/3bet/4bet → must include numeric sizing (e.g. "2.5x", "75%")
 
 ### 2. EXPLOIT TYPE PRIORITY (MANDATORY)
 When an opponent has a clear leak:
@@ -251,10 +254,34 @@ When an opponent has a clear leak:
 - Offensive Domination: Against Calling Stations, use massive sizing and the widest possible value range.
 - Exploit = punish. Do not output defensive "safe" strategies.
 
-### 4. STRATEGY STRUCTURE (ABSOLUTE)
-Each move MUST follow:
-[Street | Position | Facing Action | Action]: 
-Range = <exact classes>, Structure = <linear/polar>, Sizing = <size/null>, Frequency = <%>
+### 4. RANGE FORMAT STRICT (MANDATORY)
+All ranges MUST use valid poker notation:
+- Allowed examples: A5s-A2s, KQo, TT+, 89s
+- FORBIDDEN: "weak hands", "strong hands", "unpaired boards", "bluffs"
+- If invalid range format is generated → REWRITE.
+
+### 5. EXPLOIT DIRECTION vs AGGRO (MANDATORY)
+Against over-aggressive opponents (high XR, cold 4bet, etc.):
+- Increase CALLING and TRAPPING frequency.
+- PREFLOP: Do not pure 4bet linear hands like KQs or AQo. KQs is typically a call, and AQo is a mix/bluff.
+- Do NOT overfold. Do NOT avoid confrontation.
+- If strategy reduces interaction or defensively folds → REWRITE.
+
+### 6. EXPLOIT DIRECTION vs FISH / PASSIVE (MANDATORY)
+Against Calling Stations, Passive players, or Fish (high VPIP, low PFR/AF):
+- NEVER slowplay. NEVER bluff catch or run elaborate bluffs.
+- Over-Fold to their aggression: If a passive player raises or check-raises, they have the nuts. FOLD linear hands.
+- Expand THIN VALUE: Bet massive sizings (Overbets, pot-size) with your strong hands. They will call.
+- PREFLOP: Over-ISO (Isolate) raise and squeeze them mercilessly.
+
+### 7. JSON VALIDITY (CRITICAL)
+The final output MUST be perfectly valid JSON.
+Requirements:
+- NO duplicate keys.
+- Proper commas and brackets.
+- NO repeated fields (e.g., do not output "frequency" twice in the same object).
+- NO partial objects or trailing commas.
+- If JSON is invalid → REWRITE entire response.
 `;
 
   const schemaBlock = `

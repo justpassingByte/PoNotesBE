@@ -268,7 +268,7 @@ class ActionLogParser:
                         streets_data[street_key].append(current_entry)
                     current_entry = {
                         "player": line, "pos": "", "action": "", "amount": "", "hand": [],
-                        "y": item['y']
+                        "_y": item['y']
                     }
                 elif current_entry.get('player'):
                     # Assign to current player
@@ -342,12 +342,11 @@ class ActionLogParser:
 
             # Card Matching: match detected cards to player entries by Y-proximity
             for entry in streets_data[street_key]:
-                if "y" in entry:
+                if "_y" in entry:
                     for card in found_player_hands:
                         c_col = min(range(5), key=lambda ci: abs(card['x'] - header_centers[ci]))
-                        if c_col == i and abs(card['y'] - entry['y']) < 30:
+                        if c_col == i and abs(card['y'] - entry['_y']) < 30:
                             entry['hand'].append(card['name'])
-                    entry.pop('y', None)
 
             if i == 0:
                 street_pots["blinds_ante"] = f"{total_blind_sum:.2f} BB"

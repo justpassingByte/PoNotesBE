@@ -71,14 +71,14 @@ model UserAIConfig {
   updated_at      DateTime @updatedAt
 
   // NEW BEHAVIORAL FIELDS (Player Profiling)
-  ai_style         String @default("Balanced") // "GTO" | "Balanced" | "Exploit"
-  aggression_bias  Int    @default(50) // 0 - 100
+  ai_style         String @default("Exploit") // "GTO" | "Balanced" | "Exploit"
+  aggression_bias  Int    @default(85) // 0 - 100
   insight_depth    String @default("Deep") // "Quick" | "Deep"
   behavior_toggles Json? // JSON for specific switches
 
   // NEW BEHAVIORAL FIELDS (Hand Analysis)
-  hand_style            String @default("Balanced")
-  hand_aggression_bias  Int    @default(50)
+  hand_style            String @default("Exploit")
+  hand_aggression_bias  Int    @default(85)
   hand_insight_depth    String @default("Deep")
   hand_behavior_toggles Json?
 

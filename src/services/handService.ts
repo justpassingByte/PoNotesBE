@@ -49,6 +49,9 @@ export class HandService {
         if (params.inputType === 'image') {
             const ocrResponse = await this.ocrParseImage(params.rawInput, params.tier);
             const rawData = ocrResponse.data || ocrResponse;
+            console.log('\n--- [HandService] RAW OCR DATA RECEIVED ---');
+            console.log(JSON.stringify(rawData, null, 2).slice(0, 1500) + '... (truncated)');
+            
             const playersMap = new Map<string, any>();
             
             // Build players from streets (Robust extraction of position and identity)
@@ -73,6 +76,21 @@ export class HandService {
                 });
             });
 
+            // --- Inject Hero Hand ---
+            if (rawData.hero_hand && Array.isArray(rawData.hero_hand) && rawData.hero_hand.length > 0) {
+                // If the OCR identified a player explicitly named "Hero", give them the cards.
+                // Otherwise, create a generic "Hero" entry so the frontend and AI can see the hole cards.
+                if (playersMap.has('Hero')) {
+                    playersMap.get('Hero').hole_cards = rawData.hero_hand;
+                } else {
+                    playersMap.set('Hero', {
+                        name: 'Hero',
+                        position: undefined,
+                        hole_cards: rawData.hero_hand
+                    });
+                }
+            }
+
             // Parse pot to number
             const potStr = rawData.pot ? String(rawData.pot).replace(/[^\d.]/g, '') : '0';
 
@@ -83,7 +101,7 @@ export class HandService {
                 return match ? parseFloat(match[1]) : undefined;
             };
 
-            const mapActions = (streetActions: any[]) => {
+            const mapActions = (streetActions: any[], streetName: string) => {
                 if (!Array.isArray(streetActions)) return [];
                 return streetActions.map(act => {
                     let standardAction = act.action?.toLowerCase() || '';
@@ -98,10 +116,13 @@ export class HandService {
 
                     const rawPlayer = act.player;
                     const playerName = typeof rawPlayer === 'string' ? rawPlayer.trim() : (rawPlayer?.name || String(rawPlayer || 'Hero'));
+                    const pos = act.pos || act.position || undefined;
+                    
+                    console.log(`[HandService] Action Mapped [${streetName}]: Player=${playerName}, Pos=${pos}, Act=${standardAction}, Amt=${act.amount}`);
 
                     return {
                         player: playerName,
-                        position: act.pos || act.position || undefined,
+                        position: pos,
                         action: standardAction,
                         amount: parseAmount(act.amount),
                     };
@@ -112,10 +133,10 @@ export class HandService {
                 board: rawData.board || [],
                 players: Array.from(playersMap.values()),
                 actions: {
-                    preflop: mapActions(rawData.streets?.preflop),
-                    flop: mapActions(rawData.streets?.flop),
-                    turn: mapActions(rawData.streets?.turn),
-                    river: mapActions(rawData.streets?.river)
+                    preflop: mapActions(rawData.streets?.preflop, 'preflop'),
+                    flop: mapActions(rawData.streets?.flop, 'flop'),
+                    turn: mapActions(rawData.streets?.turn, 'turn'),
+                    river: mapActions(rawData.streets?.river, 'river')
                 },
                 pot: parseFloat(potStr) || 0,
             } as any;
@@ -220,7 +241,13 @@ export class HandService {
     }
 
     private async autoExtractNotesFromAnalysis(userId: string, hand: any, parsedHand: ParsedHand, analysis: HandAnalysis): Promise<string[]> {
-        const villainMistakes = (analysis as any).villainMistakes || analysis.mistakes?.filter(m => m.player.toLowerCase() !== 'hero') || [];
+        const heroPlayer = parsedHand.players?.find(p => p.hole_cards && p.hole_cards.length > 0);
+        const heroName = heroPlayer?.name?.toLowerCase() || 'hero';
+
+        const villainMistakes = (analysis as any).villainMistakes || analysis.mistakes?.filter(m => {
+            const lowName = m.player?.toLowerCase();
+            return lowName !== 'hero' && lowName !== heroName;
+        }) || [];
         if (villainMistakes.length === 0 && !analysis.exploit_suggestions?.length) {
             await LoggerService.log(userId, LogType.SYSTEM, `No actionable villain leaks found in this hand.`, { handId: hand.id }, hand.id);
             return [];
