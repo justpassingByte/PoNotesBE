@@ -702,7 +702,7 @@ class CardDetector:
         else:
              logger.warning(f"[CardDetector] Cannot report error: filename '{filename}' not in meta.")
 
-    def learn_card(self, card_img, card_name, verification_source='auto', failed_cases_dir="failed_cases"):
+    def learn_card(self, card_img, card_name, verification_source='auto', failed_cases_dir="failed_cases", layout_name=None):
         """
         Safe self-learning with:
         - Verification source check (high_confidence | user_confirmed | user_corrected)
@@ -712,7 +712,14 @@ class CardDetector:
         """
         if not self.enable_learning:
             return
-        if card_name in self.card_templates and verification_source == 'auto':
+            
+        suffix = "_auto" if verification_source == 'high_confidence' else "_user"
+        if layout_name:
+            suffix = f"_{layout_name}{suffix}"
+            
+        filename = f"{card_name}{suffix}.png"
+        
+        if filename in self.card_templates and verification_source == 'auto':
             return  # Already known; only overwrite if user-grounded
 
         allowed_sources = {'high_confidence', 'user_confirmed', 'user_corrected'}
@@ -726,8 +733,6 @@ class CardDetector:
         # Normalize before save - DO NOT do a tight contour crop, because matchTemplate needs the same aspect ratio as the source slot
         cropped_norm = cv2.resize(card_img, self.TARGET_CARD_SIZE, interpolation=cv2.INTER_AREA)
 
-        suffix = "_auto" if verification_source == 'high_confidence' else "_user"
-        filename = f"{card_name}{suffix}.png"
         path = os.path.join(self.templates_dir, filename)
         cv2.imwrite(path, cropped_norm)
         

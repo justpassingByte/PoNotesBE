@@ -291,49 +291,37 @@
       }
     },
     {
-      "name": "WPT_GLOBAL_PORTRAIT",
+      "name": "WPT_GLOBAL_MOBILE",
       "site": "wpt_global",
       "variant": "mobile",
       "anchor_file": "wpt_pot_label_portrait.png",
       "anchor_text": "pot",
-      "aspect_ratio": 0.65,
+      "aspect_ratio": 0.58,
       "threshold": 0.35,
       "regions": {
         "pot_area": {
-          "x1": 0.2,
-          "y1": 0.23,
-          "x2": 0.8,
-          "y2": 0.35
+          "x1": 0.30,
+          "y1": 0.105,
+          "x2": 0.75,
+          "y2": 0.135
         },
         "board_cards": {
-          "x1": 0.05,
-          "y1": 0.40,
-          "x2": 0.95,
-          "y2": 0.55
-        },
-        "hero_cards": {
-          "x1": 0.2,
-          "y1": 0.78,
-          "x2": 0.8,
-          "y2": 0.95
-        },
-        "villain_area": {
-          "x1": 0.0,
-          "y1": 0.05,
-          "x2": 1.0,
-          "y2": 0.40
+          "x1": 0.12,
+          "y1": 0.145,
+          "x2": 0.80,
+          "y2": 0.195
         },
         "action_log": {
           "x1": 0.0,
-          "y1": 0.55,
+          "y1": 0.32,
           "x2": 1.0,
-          "y2": 0.75
+          "y2": 1.0
         },
         "showdown_area": {
-          "x1": 0.05,
-          "y1": 0.15,
-          "x2": 0.95,
-          "y2": 0.65
+          "x1": 0.0,
+          "y1": 0.04,
+          "x2": 1.0,
+          "y2": 0.30
         }
       }
     }

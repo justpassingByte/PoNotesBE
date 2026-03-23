@@ -122,7 +122,7 @@ class ActionLogParser:
         # }
     """
 
-    def parse(self, action_img, ocr_results, card_detector=None, ocr_engine=None, sidebar_x=None):
+    def parse(self, action_img, ocr_results, card_detector=None, ocr_engine=None, sidebar_x=None, layout_name=None):
         """
         Parse action log image into structured streets data.
         
@@ -131,6 +131,8 @@ class ActionLogParser:
             ocr_results:    PaddleOCR results from ocr.ocr(action_img)
             card_detector:  CardDetector instance for finding player hand cards
             ocr_engine:     PaddleOCR engine instance (for card detection)
+            sidebar_x:      X-coordinate boundary to mask out the right sidebar
+            layout_name:    Name of the layout to prefix learned templates (e.g., 'WPT_GLOBAL_MOBILE')
             
         Returns:
             {
@@ -202,8 +204,8 @@ class ActionLogParser:
                     cw, ch = rect[2], rect[3]
                     logger.info(f"[ActionParser] Card {idx}: name={c['name']} conf={c['confidence']:.2f} rect={rect} (w={cw}x{ch}px) center={c['center']}")
                     
-                    # Filter: reject too-small elements (icons, badges) — real cards ≥ 35px wide
-                    if cw < 35 or ch < 50:
+                    # Filter: reject too-small elements (icons, badges) — real cards ≥ 25px wide
+                    if cw < 25 or ch < 35:
                         logger.info(f"[ActionParser] Card {idx}: SKIPPED (too small {cw}x{ch}px)")
                         continue
                     # Filter: reject near-square elements (avatars) — cards aspect ~0.67
@@ -211,6 +213,13 @@ class ActionLogParser:
                     if aspect > 0.85 or aspect < 0.45:
                         logger.info(f"[ActionParser] Card {idx}: SKIPPED (bad aspect {aspect:.2f})")
                         continue
+                    # Filter: reject FOLD cards (face-down, dark gray card backs)
+                    if c.get('image') is not None:
+                        gray_card = _cv2.cvtColor(c['image'], _cv2.COLOR_BGR2GRAY) if len(c['image'].shape) == 3 else c['image']
+                        mean_val = float(gray_card.mean())
+                        if mean_val < 120:
+                            logger.info(f"[ActionParser] Card {idx}: SKIPPED (Dark FOLD card, mean={mean_val:.1f})")
+                            continue
                     
 
                     # Interactive: ask user to correct ?? or low-confidence river cards
@@ -221,6 +230,7 @@ class ActionLogParser:
                                 c['name'] = user_input
                                 c['confidence'] = 1.0
                                 if c.get('image') is not None:
+                                    # Use a default layout_name='River_Interactive' if None passed, but parse takes layout_name?
                                     card_detector.learn_card(c['image'], user_input, verification_source='user_corrected')
                                     print(f"  [LEARN] User taught river card: {user_input}")
                         except EOFError:

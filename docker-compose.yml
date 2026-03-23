@@ -40,6 +40,8 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/1
+    volumes:
+      - ./ocr-service/templates:/app/templates
     depends_on:
       - redis
     deploy:
@@ -60,6 +62,8 @@ services:
       - REDIS_URL=redis://redis:6379/1
       - PADDLE_NUM_THREADS=1
       - OMP_NUM_THREADS=1
+    volumes:
+      - ./ocr-service/templates:/app/templates
     depends_on:
       - redis
     deploy:

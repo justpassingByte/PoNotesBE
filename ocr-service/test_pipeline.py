@@ -83,6 +83,7 @@ def test_pipeline(img_path="ocrtest.png"):
     board_cards = []
     if 'board_cards' in regions:
         board_img = layout_engine.crop_region(img, regions['board_cards'])
+        cv2.imwrite("debug_crop_board.png", board_img)
         bh, bw = board_img.shape[:2]
         print(f"  Crop size: {bw}x{bh}")
 
@@ -96,14 +97,14 @@ def test_pipeline(img_path="ocrtest.png"):
                 # Self-learning: save high-confidence OCR cards as templates
                 if c.get('is_new') and c['confidence'] >= 0.85 and c['name'] != '??':
                     print(f"  [LEARN] Saving template for: {c['name']}")
-                    card_detector.learn_card(c['image'], c['name'], verification_source='high_confidence')
+                    card_detector.learn_card(c['image'], c['name'], verification_source='high_confidence', layout_name=layout_name)
                 # Interactive: ask user to correct ?? or low-confidence cards
                 elif c['name'] == '??' or c['confidence'] < 0.70:
                     user_input = input(f"  [?] Card {i} is '{c['name']}'. Correct name (e.g. 9h) or Enter to skip: ").strip()
                     if user_input:
                         c['name'] = user_input
                         c['confidence'] = 1.0
-                        card_detector.learn_card(c['image'], user_input, verification_source='user_corrected')
+                        card_detector.learn_card(c['image'], user_input, verification_source='user_corrected', layout_name=layout_name)
                         print(f"  [LEARN] User taught: {user_input}")
             board_cards = [c['name'] for c in card_info]
 
@@ -121,6 +122,7 @@ def test_pipeline(img_path="ocrtest.png"):
     raw_pot = ""
     if 'pot_area' in regions:
         pot_img = layout_engine.crop_region(img, regions['pot_area'])
+        cv2.imwrite("debug_crop_pot.png", pot_img)
         pot_res = ocr.ocr(pot_img, cls=True)
         raw_pot = pot_res[0][0][1][0] if pot_res and pot_res[0] else ""
     print(f"  Raw: '{raw_pot}'")
@@ -135,6 +137,7 @@ def test_pipeline(img_path="ocrtest.png"):
     street_pots = {}
     if 'action_log' in regions:
         action_img = layout_engine.crop_region(img, regions['action_log'])
+        cv2.imwrite("debug_crop_action.png", action_img)
         ah, aw = action_img.shape[:2]
         print(f"  Crop size: {aw}x{ah}")
 
@@ -150,7 +153,10 @@ def test_pipeline(img_path="ocrtest.png"):
             action_range = action_x2_ratio - action_x1_ratio
             sidebar_x = int((sidebar_x1_ratio - action_x1_ratio) / action_range * aw) if action_range > 0 else None
 
-        parsed = action_parser.parse(action_img, action_ocr, card_detector, ocr, sidebar_x=sidebar_x)
+        parsed = action_parser.parse(
+            action_img, action_ocr, card_detector, ocr, 
+            sidebar_x=sidebar_x, layout_name=layout_name
+        )
         streets_data = parsed['streets']
         street_pots = parsed['street_pots']
 
