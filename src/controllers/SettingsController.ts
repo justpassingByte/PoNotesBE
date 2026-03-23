@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
-import { buildProfilePrompt } from '../services/promptManager';
+import { buildProfilePrompt, buildHandAnalysisPrompt } from '../services/promptManager';
 
 export class SettingsController {
     /**
@@ -115,5 +115,33 @@ export class SettingsController {
         });
 
         return res.json({ success: true, data: config });
+    });
+    /**
+     * Preview AI Prompts based on settings
+     */
+    static getAIPreview = asyncErrorWrapper(async (req: Request, res: Response) => {
+        const { ai_style, aggression_bias, insight_depth, behavior_toggles, hand_style, hand_aggression_bias, hand_insight_depth, hand_behavior_toggles } = req.body;
+        
+        const profilePrompt = buildProfilePrompt(undefined, { 
+            ai_style, 
+            aggression_bias, 
+            insight_depth, 
+            behavior_toggles 
+        });
+        
+        const analysisPrompt = buildHandAnalysisPrompt(undefined, {
+            hand_style,
+            hand_aggression_bias,
+            hand_insight_depth,
+            hand_behavior_toggles
+        });
+
+        return res.json({ 
+            success: true, 
+            data: { 
+                system_prompt: profilePrompt,
+                analysis_prompt: analysisPrompt 
+            } 
+        });
     });
 }

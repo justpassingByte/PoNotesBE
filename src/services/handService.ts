@@ -339,6 +339,31 @@ export class HandService {
         const groqKey = process.env.GROQ_API_KEY;
         const aiConfig = userId ? await prisma.userAIConfig.findUnique({ where: { user_id: userId } }) : null;
 
+        // NEW: Fetch deep player context to enable TARGETED EXPLOITS in hand analysis
+        let playerContext = "";
+        if (parsedData?.players && userId) {
+            const playerNames = parsedData.players.map(p => p.name).filter(Boolean);
+            const profiles = await prisma.player.findMany({
+                where: {
+                    user_id: userId,
+                    name: { in: playerNames, mode: 'insensitive' }
+                },
+                select: {
+                    name: true,
+                    playstyle: true,
+                    aggression_score: true,
+                    ai_profile: true,
+                    ai_exploit_strategy: true
+                }
+            });
+            
+            if (profiles.length > 0) {
+                playerContext = profiles.map(p => 
+                    `[PLAYER: ${p.name}]\n- Style: ${p.playstyle || 'UNKNOWN'}\n- Aggression: ${p.aggression_score || 0}\n- Profile Summary: ${typeof p.ai_profile === 'string' ? p.ai_profile : JSON.stringify(p.ai_profile)}\n- Strategy Override: ${p.ai_exploit_strategy || 'None'}`
+                ).join('\n---\n');
+            }
+        }
+
         const modelInfo = (aiConfig?.model_name && typeof aiConfig.model_name === 'string')
             ? { model: aiConfig.model_name, provider: aiConfig.model_name.startsWith('gpt-') ? 'openai' : 'openai' as any } // Default to openai for custom models for now
             : getModelForTier(tier);
@@ -351,7 +376,7 @@ export class HandService {
             baseURL: isChatGPT ? undefined : 'https://api.groq.com/openai/v1'
         });
 
-        const prompt = buildHandAnalysisPrompt(aiConfig?.analysis_prompt || undefined, aiConfig as any);
+        const prompt = buildHandAnalysisPrompt(aiConfig?.analysis_prompt || undefined, aiConfig as any, playerContext);
         const response = await client.chat.completions.create({
             messages: [
                 { role: 'system', content: prompt },

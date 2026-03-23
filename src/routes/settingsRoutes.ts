@@ -43,4 +43,7 @@ router.get('/ai', SettingsController.getAISettings);
 // PATCH /api/settings/ai — update user AI config
 router.patch('/ai', SettingsController.updateAISettings);
 
+// POST /api/settings/ai/preview — preview generated prompts
+router.post('/ai/preview', SettingsController.getAIPreview);
+
 export const settingsRoutes = router;
