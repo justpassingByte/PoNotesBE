@@ -48,15 +48,77 @@ export class HandService {
         let parsedData: ParsedHand | null = null;
         if (params.inputType === 'image') {
             const ocrResponse = await this.ocrParseImage(params.rawInput, params.tier);
-            parsedData = ocrResponse.data;
+            const rawData = ocrResponse.data || ocrResponse;
+            const playersMap = new Map<string, any>();
+            
+            // Build players from streets
+            Object.values(rawData.streets || {}).forEach((actions: any[]) => {
+                actions.forEach(act => {
+                    const cleanName = typeof act.player === 'string' ? act.player.trim() : act.player;
+                    if (!cleanName) return;
+                    if (!playersMap.has(cleanName)) {
+                        playersMap.set(cleanName, {
+                            name: cleanName,
+                            position: act.pos || undefined,
+                            stack: undefined, // OCR doesn't reliably give stacks yet
+                            hole_cards: []
+                        });
+                    } else if (act.pos) {
+                        playersMap.get(cleanName).position = act.pos;
+                    }
+                });
+            });
+
+            // Parse pot to number
+            const potStr = rawData.pot ? String(rawData.pot).replace(/[^\d.]/g, '') : '0';
+
+            const parseAmount = (amt: any): number | undefined => {
+                if (!amt) return undefined;
+                if (typeof amt === 'number') return amt;
+                const match = String(amt).replace(',', '.').match(/([+\-]?\d[\d\.]*)/);
+                return match ? parseFloat(match[1]) : undefined;
+            };
+
+            const mapActions = (streetActions: any[]) => {
+                if (!streetActions) return [];
+                return streetActions.map(act => {
+                    let standardAction = act.action?.toLowerCase() || '';
+                    if (standardAction.includes('tố') || standardAction === 'raise') standardAction = 'raise';
+                    else if (standardAction.includes('cược') || standardAction === 'bet') standardAction = 'bet';
+                    else if (standardAction.includes('theo') || standardAction === 'call') standardAction = 'call';
+                    else if (standardAction.includes('bỏ bài') || standardAction.includes('fold')) standardAction = 'fold';
+                    else if (standardAction.includes('check') || standardAction.includes('xem')) standardAction = 'check';
+                    else if (standardAction.includes('all') || standardAction.includes('in')) standardAction = 'all-in';
+                    else if (standardAction.includes('post') || standardAction.includes('sb') || standardAction.includes('bb')) standardAction = 'post';
+
+                    return {
+                        player: act.player,
+                        action: standardAction,
+                        amount: parseAmount(act.amount),
+                        position: act.pos || undefined,
+                    };
+                });
+            };
+
+            parsedData = {
+                board: rawData.board || [],
+                players: Array.from(playersMap.values()),
+                actions: {
+                    preflop: mapActions(rawData.streets?.preflop),
+                    flop: mapActions(rawData.streets?.flop),
+                    turn: mapActions(rawData.streets?.turn),
+                    river: mapActions(rawData.streets?.river)
+                },
+                pot: parseFloat(potStr) || 0,
+            } as any;
 
             (parsedData as any).ocr_result = {
                 confidence: ocrResponse.confidence?.total ?? 0,
-                decision: ocrResponse.decision,
-                decision_reason: ocrResponse.decision_reason,
-                needs_confirmation: ocrResponse.needs_confirmation,
-                breakdown: ocrResponse.confidence?.breakdown,
-                performance: ocrResponse.performance
+                decision: ocrResponse.decision || 'auto_accept',
+                decision_reason: ocrResponse.decision_reason || [],
+                needs_confirmation: ocrResponse.needs_confirmation || false,
+                breakdown: ocrResponse.confidence?.breakdown || {},
+                performance: ocrResponse.performance || {}
             };
 
             await UsageService.incrementUsage(params.userId, UsageActionType.OCR_HAND, params.tier);
@@ -289,7 +351,7 @@ export class HandService {
             baseURL: isChatGPT ? undefined : 'https://api.groq.com/openai/v1'
         });
 
-        const prompt = buildHandAnalysisPrompt(aiConfig?.system_prompt || undefined, aiConfig as any);
+        const prompt = buildHandAnalysisPrompt(aiConfig?.analysis_prompt || undefined, aiConfig as any);
         const response = await client.chat.completions.create({
             messages: [
                 { role: 'system', content: prompt },

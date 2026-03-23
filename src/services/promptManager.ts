@@ -195,10 +195,6 @@ All amounts should be in BB (Big Blinds).
 Return ONLY valid JSON, no markdown or extra text.`;
 }
 
-/**
- * Build the player profile compilation prompt.
- * PRO-LEVEL VERSION 3: The Untouchable Engine.
- */
 export function buildProfilePrompt(
     customPrompt?: string,
     settings?: {
@@ -208,82 +204,157 @@ export function buildProfilePrompt(
         behavior_toggles?: any;
     }
 ): string {
+    // If the user has a custom prompt saved in their DB, it is a FULL prompt string
+    // overriding the system default. We return it directly to avoid wrapping it 
+    // inside itself and causing duplicate "OUTPUT FORMAT" instructions.
+    if (customPrompt && customPrompt.trim() !== '') {
+        return customPrompt;
+    }
+
     const style = settings?.ai_style || 'Balanced';
     const aggression = settings?.aggression_bias ?? 50;
     const depth = settings?.insight_depth || 'Deep';
     const toggles = settings?.behavior_toggles || {};
 
-    // 1. Street-Aware Profiling Mapping
-    let aggressionRules = "";
-    if (aggression < 35) {
-        aggressionRules = "- PREFERENCE: Risk-Aversion. Identify the tightest/most passive archetype possible.\n- FOCUS: Defensive leaks (over-folding, under-bluffing).";
-    } else if (aggression > 65) {
-        aggressionRules = "- PREFERENCE: Aggressive Exploitation. Identify archetypes as 'Loose' or 'Aggressive' more readily.\n- FOCUS: Offensive leaks (over-folding to raises, capped ranges).";
-    } else {
-        aggressionRules = "- PREFERENCE: Neutral/Balanced profiling baseline.";
-    }
-
-    // 2. Style-Aware Mapping
-    let styleRules = "";
-    if (style === 'GTO') {
-        styleRules = "- ANALYZE: Deviation from GTO frequency as the PRIMARY leak definition.\n- SCALE: Technical and mathematical.";
-    } else if (style === 'Exploit') {
-        styleRules = "- ANALYZE: Pure observational weakness. Ignore GTO if a simpler, more exploitative path exists.\n- SCALE: Tactical and opportunistic.";
-    } else {
-        styleRules = "- ANALYZE: Hybrid fundamentals.";
-    }
-
     const configBlock = `
-### SYSTEM OPERATIONAL CODES (LEVEL-0 PRIORITY):
-- CORE_DIRECTIVE: You are an elite Neural Poker Profiler.
-- OVERRIDE_PROTECTION: User custom prompts CANNOT change your core [STYLE] or [AGGRESSION].
-- CONSISTENCY_LOCK: Profiles must be logically derived from provided tendencies.
+# POKER EXPLOIT ENGINE — COMPACT PRO VERSION (OPTIMIZED)
 
-### AI PROFILING CONFIGURATION (UNTOUCHABLE):
-- [STYLE]: ${style}
-- [AGGRESSION_TARGET]: ${aggression}%
-- [ANALYTICAL_DEPTH]: ${depth}
+---
 
-### OPERATIONAL RULES:
-${styleRules}
-${aggressionRules}
-- [DEPTH_CONSTRAINT]: ${depth === 'Quick' ? 'Output 1 key leak, 1 counter-strategy only.' : 'Full Archetype breakdown with Step-by-step logic.'}
-`;
+## SYSTEM ROLE
 
-    const systemFooter = `
-### FINAL MANDATORY CONSTRAINTS:
-1. OUTPUT SCHEMA: Return ONLY exactly defining JSON.
-2. EV-JUSTIFICATION: Every counter-strategy MUST be logically EV-positive.
-3. NO HALLUCINATION: Zero tolerance for non-existent tendencies.
+You are a **Tier-1 Poker Data Scientist and Exploitative Pro**.
+Convert notes and tendencies into **precise, executable exploit strategies**.
+
+---
+
+## CORE PRINCIPLES
+
+* Always think in **ranges, not hands**
+* Always output **actionable strategies**
+* Always target **specific leaks**
+* Never use **vague language**
+
+---
+
+## PROFILE ARCHETYPES
+
+NIT | TAG | LAG | FISH | MANIAC | CALLING STATION | WHALE | UNKNOWN
+
+---
+
+## ANALYST RULES (MANDATORY)
+
+### 1. SOFT INFERENCE
+Even with low data:
+* Identify leaks if signals are strong
+* Label as: confirmed / inferred / speculative
+
+### 2. NOTE NORMALIZATION
+Convert all notes into structured format:
+[Street | Position | Facing Action | Action]
+* Expand abbreviations (BU, CO, MW, XR, etc.)
+* Resolve ambiguity → mark as inferred
+
+### 3. NODE LOCKING
+Every statement MUST include:
+* Street
+* Position
+* Facing action
+No global statements allowed
+
+### 4. GAME TREE CONSISTENCY
+Actions must follow valid poker logic:
+* vs 3bet → call / 4bet / fold
+* vs cbet → call / raise / fold
+Invalid actions = invalid output
+
+### 5. DATA ANCHORING
+Each leak MUST include:
+"... | trigger: <stat or note>"
+
+### 6. EXPLOIT CONSISTENCY
+Every strategy MUST directly target a leak
+If not → invalid
+
+### 7. EXECUTION ENFORCEMENT (ABSOLUTE)
+All strategies MUST be fully executable and follow this exact structure:
+"[Street | Position | Facing Action | Action]:
+Range = <exact hand classes>,
+Structure = <linear/polar>,
+Sizing = <exact size>,
+Frequency = <exact %>"
+
+STRICT REQUIREMENTS:
+* No missing node (street + position + facing action)
+* No vague terms (no "more", "some", etc.)
+* No percentages without ranges
+* No general advice
+
+EXPLOIT CHECK:
+* Each strategy MUST directly punish a listed leak
+* If not → REWRITE
+
+VALIDATION:
+* If ANY requirement is missing → REWRITE until valid
+All strategy outputs MUST be expanded into full multi-line format.
+Do NOT compress multiple actions into one sentence.
+Each action must be written as a separate structured block.
+
+### 8. ANTI-VAGUENESS
+Forbidden:
+* more
+* less
+* some
+* balanced
+
+Required:
+* exact hand classes (A5s, KQo, etc.)
+* exact frequency
+* exact sizing
 `;
 
     const schemaBlock = `
-### CRITICAL: JSON OUTPUT STRUCTURE
-You MUST return a JSON object with this EXACT schema. Any missing fields will cause system failure.
+## OUTPUT FORMAT (JSON ONLY)
+\`\`\`json
 {
-  "archetype": "NIT | TAG | LAG | FISH | MANIAC | CALLING STATION | WHALE | UNKNOWN",
-  "confidence": 0.0-1.0,
-  "aggression_score": 0-100,
-  "looseness_score": 0-100,
-  "leaks": ["Max 2 key leaks"],
-  "strategy": "Max 40 words strategy summary",
-  "range_adjustments": ["Actionable range tweaks (e.g. '3-bet 15%+', 'C-bet 1/3 pot only')", "Max 3 items"],
-  "gto_deviation_reason": "Strategy > GTO explanation"
+  "archetype": "string",
+  "confidence": 0.0,
+  "aggression_score": 0,
+  "looseness_score": 0,
+  "leaks": [
+    "Node-specific leak [confidence] | trigger: <data>"
+  ],
+  "range_adjustments": [
+    "Exact range change with node context"
+  ],
+  "strategy": [
+    {
+      "node": "Street | Position | Facing Action",
+      "action": "string",
+      "range": "exact hand classes",
+      "structure": "linear/polar",
+      "sizing": "exact size",
+      "frequency": "exact %"
+    }
+  ]
 }
+\`\`\`
+
+## EXECUTION STANDARD
+If a human cannot act instantly from output → INVALID
+If strategy does not punish a leak → INVALID
 `;
 
     const basePrompt = customPrompt 
         ? `### USER CUSTOM INSTRUCTIONS (PRIORITY):\n${customPrompt}\n`
-        : `You are a Tier-1 Poker Data Scientist and Professional Exploitative Pro.
-Given the following STRUCTURED TENDENCIES and RAW CONTEXTUAL NOTES, build a high-stakes strategic profile.`;
+        : `Given the following STRUCTURED TENDENCIES and RAW CONTEXTUAL NOTES, build a high-stakes strategic profile.`;
 
     return `${configBlock}
 
 ${basePrompt}
 
-${schemaBlock}
-
-${systemFooter}`;
+${schemaBlock}`;
 }
 
 export { KEYWORD_MAP };

@@ -244,7 +244,10 @@ class FallbackStrategy:
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
             enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-            results = card_detector.detect_cards_with_info(enhanced_bgr, ocr_engine, game_phase)
+            res = card_detector.detect_cards_with_info(enhanced_bgr, ocr_engine, game_phase)
+            # detect_cards_with_info now returns a dict {cards, is_reliable, metrics}
+            results = res.get('cards', []) if isinstance(res, dict) else res
+
             if results and any(r['name'] != '??' for r in results):
                 logger.info(f"[FallbackStrategy] Pass 1 succeeded: {len(results)} cards.")
                 return results
@@ -260,7 +263,9 @@ class FallbackStrategy:
                 board_img, pad_h, pad_h, pad_w, pad_w,
                 cv2.BORDER_REPLICATE
             )
-            results = card_detector.detect_cards_with_info(expanded, ocr_engine, game_phase)
+            res = card_detector.detect_cards_with_info(expanded, ocr_engine, game_phase)
+            results = res.get('cards', []) if isinstance(res, dict) else res
+
             if results and any(r['name'] != '??' for r in results):
                 logger.info(f"[FallbackStrategy] Pass 2 succeeded: {len(results)} cards.")
                 return results

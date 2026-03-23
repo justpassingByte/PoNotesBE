@@ -36,76 +36,9 @@ class FeedbackRequest(BaseModel):
     card_name: str
     action: str              # "confirm" | "edit" | "reject"
     corrected_name: str = ""
+    card_index: Optional[int] = None
 
-
-# ─── Endpoints ───────────────────────────────────────────────────────────────
-
-@app.get("/health")
-def health():
-    return {"status": "healthy", "service": "ocr-api"}
-
-
-@app.post("/ocr", response_model=JobResponse)
-async def submit_ocr(file: UploadFile = File(...)):
-    # 1. Basic File Validation
-    content_type = file.content_type or "image/png"
-    if not content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Invalid file type. Only images allowed.")
-
-    content: bytes = await file.read()
-    if len(content) > 100 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large. Max 100MB.")
-
-    # 2. SHA256 Caching Layer
-    image_hash = hashlib.sha256(content).hexdigest()
-    # OCR Cache Disabled per user request (Self-learning engine requirement)
-    '''
-    cached_result = cache.get(f"hash:{image_hash}")
-    if cached_result:
-        return {
-            "status": "success",
-            "job_id": f"cached:{image_hash}",
-            "cached": True,
-            "result": json.loads(cached_result)
-        }
-    '''
-
-    # 3. Queue Task to Celery
-    job = celery_app.send_task("tasks.process_hand", args=[content.hex(), image_hash])
-
-    return {
-        "status": "pending",
-        "job_id": job.id,
-        "cached": False
-    }
-
-
-@app.get("/result/{job_id}")
-async def get_result(job_id: str):
-    if job_id.startswith("cached:"):
-        image_hash = job_id.replace("cached:", "")
-        res = cache.get(f"hash:{image_hash}")
-        if res:
-            return {"status": "success", "result": json.loads(res)}
-        return {"status": "error", "detail": "Cache expired or missing"}
-
-    res = celery_app.AsyncResult(job_id)
-    if res.ready():
-        if res.failed():
-            return {"status": "error", "detail": str(res.result)}
-        return {"status": "success", "result": res.result}
-
-    return {"status": "pending"}
-
-
-@app.get("/status/{image_hash}")
-async def get_status(image_hash: str):
-    """Check if a processed image has a cached result."""
-    cached = cache.get(f"hash:{image_hash}")
-    if cached:
-        return {"status": "cached", "result": json.loads(cached)}
-    return {"status": "not_found"}
-
+# ...
 
 @app.post("/feedback")
 async def submit_feedback(req: FeedbackRequest):
@@ -120,7 +53,7 @@ async def submit_feedback(req: FeedbackRequest):
 
     job = celery_app.send_task(
         "tasks.apply_feedback",
-        args=[req.image_hex, req.card_name, req.action, req.corrected_name]
+        args=[req.image_hex, req.card_name, req.action, req.corrected_name, req.card_index]
     )
     return {"status": "queued", "job_id": job.id, "action": req.action}
 

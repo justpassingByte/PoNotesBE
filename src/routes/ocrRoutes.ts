@@ -20,7 +20,7 @@ const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://ocr-api:8000';
 router.post(
     '/feedback',
     asyncErrorWrapper(async (req: Request, res: Response) => {
-        const { imageHex, cardName, action, correctedName = '', handId } = req.body;
+        const { imageHex, cardName, action, correctedName = '', handId, cardIndex } = req.body;
         const userId = (req as any).user?.id || 'system';
 
         if (!imageHex || !cardName || !action) {
@@ -78,6 +78,7 @@ router.post(
                 card_name:      cardName,
                 action:         action,
                 corrected_name: correctedName,
+                card_index:     cardIndex,
             });
             
             console.log(`[OCR_NEURAL_TRAIN] Vision Engine acknowledged learning for [${correctedName || cardName}]. Cache Updated.`);
