@@ -110,10 +110,9 @@ ${style === 'Exploit' ? `You are in EXPLOIT mode.
   const systemFooter = `
 ### MANDATORY CONSTRAINTS:
 1. OUTPUT: Valid JSON only.
-2. HERO VS VILLAIN: Identify the 'Hero' (the player with known hole cards or explicitly named 'Hero'). All other players are 'Villains'.
-3. MISSING IDENTITIES: If the JSON has a 'Hero' with hole_cards, but their actions are listed under a real username (e.g. 'PlayerA'), YOU MUST deduce which username is the Hero and evaluate the hand from their perspective.
-4. EXPLOIT_VALIDATION: If an exploit avoids profit instead of extracting it, it is wrong. Your exploit_suggestions MUST be strategies for the Hero to use against the specific Villains' leaks found in this hand.
-5. SIZING_VALIDATION: Fold/Call actions must have sizing=null.
+2. ALL PLAYERS EQUAL: Analyze mistakes and leaks for EVERY player equally. Do NOT distinguish between "Hero" and "Villain". Report each player by their actual username.
+3. EXPLOIT_VALIDATION: exploit_suggestions MUST be actionable strategies to use against specific players' leaks found in this hand.
+4. SIZING_VALIDATION: Fold/Call actions must have sizing=null.
 `;
 
   const customBase = customPrompt ? `### USER-DEFINED INSTRUCTIONS:\n${customPrompt}\n` : "";

@@ -3,19 +3,23 @@ test_pipeline.py — End-to-end test for the merged OCR pipeline.
 Tests action_parser + engine (CardDetector) without Celery/Redis.
 """
 
+# ── Suppress ALL noisy logs BEFORE imports ──
 import os
+os.environ["PPOCR_LOG_LEVEL"] = "ERROR"
+import warnings
+warnings.filterwarnings("ignore")
+import logging
+logging.disable(logging.WARNING)  # Kill ALL warning/info globally
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
+
 import sys
 import cv2
 import numpy as np
 import json
-import logging
 from paddleocr import PaddleOCR
 from engine import LayoutEngine, CardDetector, get_suit_from_color
 from action_parser import ActionLogParser, greedy_pot, parse_bb_value, format_bb, STREET_KEYS
-
-# ── Logging ──
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-logger = logging.getLogger(__name__)
 
 
 def parse_card_string_with_suit(txt, bbox, padded_img):
@@ -50,7 +54,7 @@ def test_pipeline(img_path="ocrtest.png"):
     # 1. Initialize
     ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)  # ch = Chinese + English + Numbers
     layout_engine = LayoutEngine(config_path="layout_config.json")
-    card_detector = CardDetector(templates_dir="templates/cards", enable_learning=False)
+    card_detector = CardDetector(templates_dir="templates/cards", enable_learning=True)
     action_parser = ActionLogParser()
 
     img = cv2.imread(img_path)
@@ -86,9 +90,21 @@ def test_pipeline(img_path="ocrtest.png"):
         card_info = res.get('cards', []) if isinstance(res, dict) else res
 
         if card_info:
-            for c in card_info:
+            for i, c in enumerate(card_info):
                 src = "TEMPLATE" if not c.get('is_new') else "OCR"
                 print(f"  → {c['name']} (conf={c['confidence']:.2f}, src={src})")
+                # Self-learning: save high-confidence OCR cards as templates
+                if c.get('is_new') and c['confidence'] >= 0.85 and c['name'] != '??':
+                    print(f"  [LEARN] Saving template for: {c['name']}")
+                    card_detector.learn_card(c['image'], c['name'], verification_source='high_confidence')
+                # Interactive: ask user to correct ?? or low-confidence cards
+                elif c['name'] == '??' or c['confidence'] < 0.70:
+                    user_input = input(f"  [?] Card {i} is '{c['name']}'. Correct name (e.g. 9h) or Enter to skip: ").strip()
+                    if user_input:
+                        c['name'] = user_input
+                        c['confidence'] = 1.0
+                        card_detector.learn_card(c['image'], user_input, verification_source='user_corrected')
+                        print(f"  [LEARN] User taught: {user_input}")
             board_cards = [c['name'] for c in card_info]
 
     # Pad board to always 5 cards
@@ -97,28 +113,6 @@ def test_pipeline(img_path="ocrtest.png"):
         board_cards.append('??')
     print(f"  Board: {board_cards}")
 
-    # 4. Hero Card Detection (OCR-based, same as tasks.py)
-    print(f"\n{'─'*40}")
-    print("  HERO CARDS")
-    print(f"{'─'*40}")
-    hero_cards = []
-    hero_region = regions.get('hero_cards', {'x1': 0.3, 'y1': 0.34, 'x2': 0.45, 'y2': 0.45})
-    hero_img = layout_engine.crop_region(img, hero_region)
-    hh, hw = hero_img.shape[:2]
-    print(f"  Crop size: {hw}x{hh}")
-
-    phero = cv2.copyMakeBorder(hero_img, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=[255, 255, 255])
-    h_res = ocr.ocr(phero, cls=True)
-    if h_res and h_res[0]:
-        for line in h_res[0]:
-            txt = line[1][0].upper().replace(' ', '')
-            h_cards = parse_card_string_with_suit(txt, line[0], phero)
-            hero_cards.extend(h_cards)
-    hero_cards = list(dict.fromkeys(hero_cards))[:2]
-    # Pad hero to always 2 cards
-    while len(hero_cards) < 2:
-        hero_cards.append('??')
-    print(f"  Hero: {hero_cards}")
 
     # 5. Pot OCR
     print(f"\n{'─'*40}")
@@ -145,7 +139,18 @@ def test_pipeline(img_path="ocrtest.png"):
         print(f"  Crop size: {aw}x{ah}")
 
         action_ocr = ocr.ocr(action_img, cls=True)
-        parsed = action_parser.parse(action_img, action_ocr, card_detector, ocr)
+
+        # Calculate sidebar boundary in action_img coordinates
+        sidebar_x = None
+        if 'sidebar' in regions:
+            sidebar_x1_ratio = regions['sidebar']['x1']
+            action_x1_ratio = regions['action_log']['x1']
+            action_x2_ratio = regions['action_log']['x2']
+            # sidebar position within the action_img
+            action_range = action_x2_ratio - action_x1_ratio
+            sidebar_x = int((sidebar_x1_ratio - action_x1_ratio) / action_range * aw) if action_range > 0 else None
+
+        parsed = action_parser.parse(action_img, action_ocr, card_detector, ocr, sidebar_x=sidebar_x)
         streets_data = parsed['streets']
         street_pots = parsed['street_pots']
 
@@ -156,13 +161,105 @@ def test_pipeline(img_path="ocrtest.png"):
                 print(f"\n  [{street_key.upper()}] Pot: {pot}")
                 for e in entries:
                     hand_str = f" [{', '.join(e['hand'])}]" if e.get('hand') else ""
-                    print(f"    {e['player']} | {e['pos']} | {e['action']} | {e['amount']}{hand_str}")
+                    print(f"    {e['player']} | {e['action']} | {e['amount']}{hand_str}")
 
-    # 7. Final JSON
+    # 7. Build player_hands (mirrors tasks.py logic)
+    player_hands: dict = {}
+    # Source 1: hands in action log entries (detected via OCR+color in turn/river)
+    # Also collect card images for learning
+    card_images_map: dict = {}  # player_name -> list of card crop images
+    for sk in STREET_KEYS:
+        for entry in streets_data.get(sk, []):
+            if not isinstance(entry, dict):
+                continue
+            cards = [c for c in entry.get('hand', []) if c and c != '??']
+            if cards and entry.get('player'):
+                name = entry['player']
+                existing = player_hands.get(name, [])
+                merged = (existing + cards)[:2]
+                # If 2 identical cards → suit must be wrong on at least one
+                if len(merged) == 2 and merged[0] == merged[1] and len(merged[0]) >= 2:
+                    rank = merged[0][:-1]  # e.g. "9" from "9d"
+                    merged = [f"{rank}?", f"{rank}?"]
+                player_hands[name] = merged
+                # Collect card images for template learning
+                imgs = entry.get('card_images', [])
+                if imgs:
+                    existing_imgs = card_images_map.get(name, [])
+                    card_images_map[name] = (existing_imgs + imgs)[:2]
+
+
+    # Strip 'hand' from all street action entries (hands belong in player_hands only)
+    for sk in STREET_KEYS:
+        for entry in streets_data.get(sk, []):
+            if isinstance(entry, dict):
+                entry.pop('hand', None)
+                entry.pop('card_images', None)
+
+    # Build positions map
+    positions: dict = {}
+    for sk in STREET_KEYS:
+        for entry in streets_data.get(sk, []):
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get('player', '').strip()
+            pos  = entry.get('pos', '').strip()
+            if name and pos and name not in positions:
+                positions[name] = pos
+
+    if player_hands:
+        # Interactive: let user correct cards with unknown suit (?)
+        for name, cards in list(player_hands.items()):
+            corrected = []
+            images = card_images_map.get(name, [])
+            for i, card in enumerate(cards):
+                if '?' in card or card == '??':
+                    try:
+                        user_input = input(f"  [?] {name} card {i+1} is '{card}'. Correct (e.g. 9h) or Enter to skip: ").strip()
+                        if user_input:
+                            # If user only enters suit letter, prepend the rank from original card
+                            if len(user_input) == 1 and user_input in 'hdcs':
+                                rank = card.replace('?', '')  # "9?" → "9", "??" → ""
+                                if rank:
+                                    user_input = f"{rank}{user_input}"
+                            corrected.append(user_input)
+                            # Learn template if we have the card image
+                            if i < len(images) and images[i] is not None:
+                                card_detector.learn_card(images[i], user_input, verification_source='user_corrected')
+                                print(f"  [LEARN] Saved template: {user_input}")
+                        else:
+                            corrected.append(card)
+                    except EOFError:
+                        corrected.append(card)
+                else:
+                    corrected.append(card)
+            player_hands[name] = corrected
+
+        print(f"\n{'─'*40}")
+        print("  PLAYER HANDS")
+        print(f"{'─'*40}")
+        for name, cards in player_hands.items():
+            print(f"  {name}: {cards}")
+
+    if positions:
+        print(f"\n{'─'*40}")
+        print("  POSITIONS")
+        print(f"{'─'*40}")
+        for name, pos in positions.items():
+            print(f"  {name}: {pos}")
+
+    # 8. Final JSON
+    # Strip pos from action entries — positions are in the 'positions' object
+    for sk in STREET_KEYS:
+        for entry in streets_data.get(sk, []):
+            if isinstance(entry, dict):
+                entry.pop('pos', None)
+
     hand_data = {
         "pot": format_bb(pot_value),
         "board": board_cards,
-        "hero_hand": hero_cards,
+        "player_hands": player_hands,
+        "positions": positions,
         "streets": streets_data,
         "metadata": {"street_pots": street_pots}
     }

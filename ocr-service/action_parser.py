@@ -17,6 +17,7 @@ Pipeline:
 import re
 import logging
 
+
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
@@ -46,14 +47,13 @@ WINNER_KEYWORDS = ["winner", "thắng", "win", "won"]
 NOISE_KEYWORDS = [
     "winner", "pot", "total", "ante", "blind",
     "pre-flop", "flop", "turn", "river", "cuộc ante",
-    # Position tags that sometimes appear as standalone text
-    "sb", "bb", "btn", "utg", "hj", "co", "mp",
 ]
 
 
 # ─────────────────────────────────────────────
 # Utility Functions
 # ─────────────────────────────────────────────
+
 
 def greedy_pot(s):
     """Extract pot number, handling OCR splitting (e.g. '1 . 947' → '1.947')"""
@@ -122,7 +122,7 @@ class ActionLogParser:
         # }
     """
 
-    def parse(self, action_img, ocr_results, card_detector=None, ocr_engine=None):
+    def parse(self, action_img, ocr_results, card_detector=None, ocr_engine=None, sidebar_x=None):
         """
         Parse action log image into structured streets data.
         
@@ -181,20 +181,60 @@ class ActionLogParser:
         else:
             x_boundary = w_act
 
-        # ═══ Phase 2: Card Detection ═══
+        # ═══ Phase 2: Card Detection (river column, CardDetector) ═══
+        # Use template matching on the river column only.
+        # sidebar_x limits the right edge to exclude sidebar content.
         found_player_hands = []
         if card_detector is not None:
             try:
-                log_cards = card_detector.detect_cards_with_info(action_img, ocr_engine=ocr_engine)
-                for c in log_cards.get('cards', []):
+                import cv2 as _cv2
+                river_x1 = max(0, int(header_centers[4] - col_width * 0.6))
+                # Right edge: whichever is smaller — sidebar boundary or column edge
+                right_limit = sidebar_x if sidebar_x is not None else w_act
+                river_x2 = min(int(right_limit), int(header_centers[4] + col_width * 0.5))
+                river_col_img = action_img[:, river_x1:river_x2]
+
+
+
+                log_cards = card_detector.detect_cards_with_info(river_col_img, ocr_engine=ocr_engine, min_group_size=1)
+                for idx, c in enumerate(log_cards.get('cards', [])):
+                    rect = c.get('rect', [0,0,0,0])
+                    cw, ch = rect[2], rect[3]
+                    logger.info(f"[ActionParser] Card {idx}: name={c['name']} conf={c['confidence']:.2f} rect={rect} (w={cw}x{ch}px) center={c['center']}")
+                    
+                    # Filter: reject too-small elements (icons, badges) — real cards ≥ 35px wide
+                    if cw < 35 or ch < 50:
+                        logger.info(f"[ActionParser] Card {idx}: SKIPPED (too small {cw}x{ch}px)")
+                        continue
+                    # Filter: reject near-square elements (avatars) — cards aspect ~0.67
+                    aspect = cw / max(ch, 1)
+                    if aspect > 0.85 or aspect < 0.45:
+                        logger.info(f"[ActionParser] Card {idx}: SKIPPED (bad aspect {aspect:.2f})")
+                        continue
+                    
+
+                    # Interactive: ask user to correct ?? or low-confidence river cards
+                    if c['name'] == '??' or c['confidence'] < 0.70:
+                        try:
+                            user_input = input(f"  [?] River card {idx} is '{c['name']}'. Correct name (e.g. Qs) or Enter to skip: ").strip()
+                            if user_input:
+                                c['name'] = user_input
+                                c['confidence'] = 1.0
+                                if c.get('image') is not None:
+                                    card_detector.learn_card(c['image'], user_input, verification_source='user_corrected')
+                                    print(f"  [LEARN] User taught river card: {user_input}")
+                        except EOFError:
+                            pass
+                    
                     found_player_hands.append({
-                        "x": c['center'][0],
+                        "x": c['center'][0] + river_x1,
                         "y": c['center'][1],
-                        "name": c['name']
+                        "name": c['name'],
+                        "image": c.get('image')
                     })
-                logger.debug(f"[ActionParser] Found {len(found_player_hands)} player hand cards in action log.")
+                logger.info(f"[ActionParser] Found {len(found_player_hands)} valid cards in river column.")
             except Exception as e:
-                logger.warning(f"[ActionParser] Card detection in action log failed: {e}")
+                logger.warning(f"[ActionParser] Card detection in river column failed: {e}")
 
         # ═══ Phase 3: Column Bucketing (with boundary filter) ═══
         buckets = [[] for _ in range(5)]
@@ -214,7 +254,7 @@ class ActionLogParser:
                 continue
 
             col_idx = min(range(5), key=lambda i: abs(x_c - header_centers[i]))
-            buckets[col_idx].append({"text": text, "y": y_c})
+            buckets[col_idx].append({"text": text, "y": y_c, "bbox": box[0]})
 
         # ═══ Phase 4: Sequential Merge (Vertical Stack) ═══
         for i, bucket in enumerate(buckets):
@@ -258,9 +298,9 @@ class ActionLogParser:
                 # Player name: not pos/action/money/winner, length >= 3, not a position tag
                 is_likely_player = (
                     not is_pos and not is_action and not is_money and not is_winner
-                    and len(l_clean) >= 3  # Use cleaned length to avoid trailing space issues
-                    and not re.match(r'^\d{1,2}$', l_clean)  # Filter 1-2 digit numbers (card ranks)
-                    and l_clean not in NOISE_KEYWORDS  # Double-check against noise list
+                    and len(l_clean) >= 3
+                    and not re.match(r'^\d{1,2}$', l_clean)
+                    and l_clean not in NOISE_KEYWORDS
                 )
                 if is_likely_player:
                     # New player name detected
@@ -340,13 +380,27 @@ class ActionLogParser:
             if current_entry.get('player'):
                 streets_data[street_key].append(current_entry)
 
-            # Card Matching: match detected cards to player entries by Y-proximity
-            for entry in streets_data[street_key]:
-                if "_y" in entry:
-                    for card in found_player_hands:
-                        c_col = min(range(5), key=lambda ci: abs(card['x'] - header_centers[ci]))
-                        if c_col == i and abs(card['y'] - entry['_y']) < 30:
-                            entry['hand'].append(card['name'])
+            # Card Matching: cards appear BELOW the player name
+            col_entries_with_y = sorted(
+                [e for e in streets_data[street_key] if '_y' in e],
+                key=lambda e: e['_y']
+            )
+            for card in found_player_hands:
+                c_col = min(range(5), key=lambda ci: abs(card['x'] - header_centers[ci]))
+                if c_col != i:
+                    continue
+                card_y = card['y']
+                best_entry = None
+                best_dist = 200
+                for entry in col_entries_with_y:
+                    dist = card_y - entry['_y']
+                    if 0 <= dist < best_dist:
+                        best_dist = dist
+                        best_entry = entry
+                if best_entry:
+                    best_entry['hand'].append(card['name'])
+                    if card.get('image') is not None:
+                        best_entry.setdefault('card_images', []).append(card['image'])
 
             if i == 0:
                 street_pots["blinds_ante"] = f"{total_blind_sum:.2f} BB"

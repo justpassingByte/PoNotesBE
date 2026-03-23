@@ -6,7 +6,7 @@ import { z } from 'zod';
  */
 export const HandActionSchema = z.object({
     player: z.string(),
-    action: z.enum(['fold', 'call', 'raise', 'bet', 'check', 'all-in']),
+    action: z.enum(['fold', 'call', 'raise', 'bet', 'check', 'all-in', 'post', '']),
     amount: z.number().optional(),
     position: z.string().optional() // SB, BB, UTG, MP, HJ, CO, BTN
 });
@@ -22,12 +22,15 @@ export const ParsedHandSchema = z.object({
         hole_cards: z.array(z.string()).optional()
     })).default([]),
     actions: z.object({
+        blinds_ante: z.array(HandActionSchema).default([]),
         preflop: z.array(HandActionSchema).default([]),
         flop: z.array(HandActionSchema).default([]),
         turn: z.array(HandActionSchema).default([]),
         river: z.array(HandActionSchema).default([])
     }),
     pot: z.number().optional(),
+    street_pots: z.record(z.string(), z.string()).optional(),
+    showdown: z.record(z.string(), z.array(z.string())).optional(),
     winner: z.string().optional(),
     ocr_result: z.object({
         confidence: z.number(),

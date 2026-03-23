@@ -51,18 +51,20 @@ export class HandService {
             const rawData = ocrResponse.data || ocrResponse;
             console.log('\n--- [HandService] RAW OCR DATA RECEIVED ---');
             console.log(JSON.stringify(rawData, null, 2).slice(0, 1500) + '... (truncated)');
-            
+
             const playersMap = new Map<string, any>();
-            
-            // Build players from streets (Robust extraction of position and identity)
+            const positionsMap = rawData.positions || {};
+
+            // Build players from streets (Robust extraction of identity)
             Object.values(rawData.streets || {}).forEach((actions: any[]) => {
                 if (!Array.isArray(actions)) return;
                 actions.forEach(act => {
                     const rawPlayer = act.player;
                     const cleanName = typeof rawPlayer === 'string' ? rawPlayer.trim() : (rawPlayer?.name || String(rawPlayer || ''));
                     if (!cleanName || cleanName === 'undefined') return;
-                    
-                    const pos = act.pos || act.position || undefined;
+
+                    // Look up position from the dedicated positions map
+                    const pos = positionsMap[cleanName] || undefined;
 
                     if (!playersMap.has(cleanName)) {
                         playersMap.set(cleanName, {
@@ -76,18 +78,24 @@ export class HandService {
                 });
             });
 
-            // --- Inject Hero Hand ---
-            if (rawData.hero_hand && Array.isArray(rawData.hero_hand) && rawData.hero_hand.length > 0) {
-                // If the OCR identified a player explicitly named "Hero", give them the cards.
-                // Otherwise, create a generic "Hero" entry so the frontend and AI can see the hole cards.
-                if (playersMap.has('Hero')) {
-                    playersMap.get('Hero').hole_cards = rawData.hero_hand;
-                } else {
-                    playersMap.set('Hero', {
-                        name: 'Hero',
-                        position: undefined,
-                        hole_cards: rawData.hero_hand
-                    });
+            // --- Inject Player Hands  ---
+            if (rawData.player_hands && typeof rawData.player_hands === 'object') {
+                for (const [playerName, cards] of Object.entries(rawData.player_hands)) {
+                    const validCards = (cards as string[]).filter(c => c && !c.includes('?'));
+                    if (validCards.length === 0) continue;
+                    if (playersMap.has(playerName)) {
+                        const existing = playersMap.get(playerName).hole_cards || [];
+                        if (existing.length === 0) {
+                            playersMap.get(playerName).hole_cards = validCards;
+                        }
+                    } else {
+                        const pos = positionsMap[playerName] || undefined;
+                        playersMap.set(playerName, {
+                            name: playerName,
+                            position: pos,
+                            hole_cards: validCards
+                        });
+                    }
                 }
             }
 
@@ -115,14 +123,12 @@ export class HandService {
                     else if (standardAction.includes('post') || standardAction.includes('sb') || standardAction.includes('bb')) standardAction = 'post';
 
                     const rawPlayer = act.player;
-                    const playerName = typeof rawPlayer === 'string' ? rawPlayer.trim() : (rawPlayer?.name || String(rawPlayer || 'Hero'));
-                    const pos = act.pos || act.position || undefined;
-                    
-                    console.log(`[HandService] Action Mapped [${streetName}]: Player=${playerName}, Pos=${pos}, Act=${standardAction}, Amt=${act.amount}`);
+                    const playerName = typeof rawPlayer === 'string' ? rawPlayer.trim() : (rawPlayer?.name || String(rawPlayer || 'Unknown'));
+
+                    console.log(`[HandService] Action Mapped [${streetName}]: Player=${playerName}, Act=${standardAction}, Amt=${act.amount}`);
 
                     return {
                         player: playerName,
-                        position: pos,
                         action: standardAction,
                         amount: parseAmount(act.amount),
                     };
@@ -133,12 +139,15 @@ export class HandService {
                 board: rawData.board || [],
                 players: Array.from(playersMap.values()),
                 actions: {
+                    blinds_ante: mapActions(rawData.streets?.blinds_ante, 'blinds_ante'),
                     preflop: mapActions(rawData.streets?.preflop, 'preflop'),
                     flop: mapActions(rawData.streets?.flop, 'flop'),
                     turn: mapActions(rawData.streets?.turn, 'turn'),
                     river: mapActions(rawData.streets?.river, 'river')
                 },
                 pot: parseFloat(potStr) || 0,
+                street_pots: rawData.metadata?.street_pots || {},
+                showdown: rawData.showdown || rawData.player_hands || {},
             } as any;
 
             (parsedData as any).ocr_result = {
@@ -254,10 +263,10 @@ export class HandService {
         }
 
         await LoggerService.log(
-            userId, 
-            LogType.AI_LEARNING, 
-            `Extracting ${villainMistakes.length} actionable leaks from AI neural output...`, 
-            { raw_mistakes: villainMistakes.map(m => m.description) }, 
+            userId,
+            LogType.AI_LEARNING,
+            `Extracting ${villainMistakes.length} actionable leaks from AI neural output...`,
+            { raw_mistakes: villainMistakes.map(m => m.description) },
             hand.id
         );
 
@@ -343,7 +352,7 @@ export class HandService {
 
             const { job_id } = await response.json();
             console.log(`[OCR_ENGINE] Sent visual payload. Job ID: ${job_id}. Waiting for core...`);
-            
+
             for (let i = 0; i < 20; i++) {
                 const poll = await fetch(`${ocrServiceUrl}/result/${job_id}`);
                 const data = await poll.json();
@@ -366,7 +375,7 @@ export class HandService {
             players: [],
             board: [],
             pot: 0,
-            actions: { preflop: [], flop: [], turn: [], river: [] }
+            actions: { blinds_ante: [], preflop: [], flop: [], turn: [], river: [] }
         };
     }
 
@@ -391,9 +400,9 @@ export class HandService {
                     ai_exploit_strategy: true
                 }
             });
-            
+
             if (profiles.length > 0) {
-                playerContext = profiles.map(p => 
+                playerContext = profiles.map(p =>
                     `[PLAYER: ${p.name}]\n- Style: ${p.playstyle || 'UNKNOWN'}\n- Aggression: ${p.aggression_score || 0}\n- Profile Summary: ${typeof p.ai_profile === 'string' ? p.ai_profile : JSON.stringify(p.ai_profile)}\n- Strategy Override: ${p.ai_exploit_strategy || 'None'}`
                 ).join('\n---\n');
             }
@@ -423,7 +432,7 @@ export class HandService {
         });
 
         const rawJson = response.choices[0]?.message?.content || '{}';
-        
+
         // Verbose Logging for Debugging/Learning Loop
         console.log(`\n[AI_LEARNING_DUMP] Raw Model Output:\n${rawJson}\n`);
 

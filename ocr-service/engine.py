@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 VALID_RANKS = {'a', 'k', 'q', 'j', 't', '10', '9', '8', '7', '6', '5', '4', '3', '2'}
 
 RANK_MAP = {
-    '0': '10', '1o': '10', 'io': '10', 'l0': '10',
+    '10': '10', '1o': '10', 'io': '10', 'l0': '10',
     '1': 'A',
     '09': '9', '06': '6', '08': '8', '07': '7',
     '05': '5', '04': '4', '03': '3', '02': '2',
@@ -57,17 +57,23 @@ def get_suit_from_color(roi):
     """Detect card suit from its color: red=hearts, blue=diamonds, green=clubs, default=spades."""
     if roi is None or roi.size == 0:
         return 's'
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    lower_red1, upper_red1 = np.array([0, 50, 50]),   np.array([10, 255, 255])
-    lower_red2, upper_red2 = np.array([170, 50, 50]), np.array([180, 255, 255])
-    lower_blue, upper_blue  = np.array([100, 50, 50]), np.array([130, 255, 255])
-    lower_green, upper_green = np.array([40, 50, 50]),  np.array([90, 255, 255])
+    
+    # Focus on top 60% of card where rank+suit symbol are (avoid bottom noise)
+    h = roi.shape[0]
+    top_region = roi[:int(h * 0.6), :]
+    
+    hsv = cv2.cvtColor(top_region, cv2.COLOR_BGR2HSV)
+    # Lower V threshold (30 instead of 50) to catch colored elements on dark backgrounds
+    lower_red1, upper_red1 = np.array([0, 40, 30]),   np.array([10, 255, 255])
+    lower_red2, upper_red2 = np.array([170, 40, 30]), np.array([180, 255, 255])
+    lower_blue, upper_blue  = np.array([100, 40, 30]), np.array([130, 255, 255])
+    lower_green, upper_green = np.array([40, 40, 30]),  np.array([90, 255, 255])
     mask_red   = cv2.inRange(hsv, lower_red1, upper_red1) | cv2.inRange(hsv, lower_red2, upper_red2)
     mask_blue  = cv2.inRange(hsv, lower_blue, upper_blue)
     mask_green = cv2.inRange(hsv, lower_green, upper_green)
     counts = {'h': cv2.countNonZero(mask_red), 'd': cv2.countNonZero(mask_blue), 'c': cv2.countNonZero(mask_green)}
     best_suit = max(counts, key=lambda k: counts[k])
-    return best_suit if counts[best_suit] >= 5 else 's'
+    return best_suit if counts[best_suit] >= 2 else 's'
 
 # ─────────────────────────────────────────────
 # LayoutEngine
@@ -203,8 +209,10 @@ class CardDetector:
                         {"usage_count": 0, "success_rate": 1.0, "last_used": time.time()}
                     )
 
+
+
     # ── Contour detection with merged split & gap guard ──
-    def _detect_card_rects(self, board_img):
+    def _detect_card_rects(self, board_img, min_group_size=2):
         """
         Detect card bounding boxes via thresholding + contours.
         Handles merged cards by splitting wide contours.
@@ -226,11 +234,17 @@ class CardDetector:
             cv2.THRESH_BINARY, 15, -5
         )
 
+
+
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        logger.info(f"[CardDetector] Found {len(contours)} raw contours in {bw}x{bh} image (scale={scale})")
 
         rects = []
         img_h_scaled = int(board_img.shape[0] * scale)
-        min_h = max(10, int(img_h_scaled * 0.10))  # 10% of scaled height, min 10px
+        # Cap min_h: 10% of scaled height works for dedicated board crops,
+        # but for tall crops (action log ≥200px) it becomes too large.
+        # Hard cap at 40px scaled to allow small embedded card thumbnails.
+        min_h = max(10, min(int(img_h_scaled * 0.10), 40))
         for c in contours:
             x, y, w, h = cv2.boundingRect(c)
             area = w * h
@@ -239,8 +253,9 @@ class CardDetector:
             if h < min_h or area < 300:
                 continue
             
-            # Card must be at least 12% of image height (supports small hero card crops)
-            if h < img_h_scaled * 0.12:
+            # 12%-of-height guard: only enforce on short dedicated crops (≤200px)
+            # For tall crops (action-log river column) this filter is too aggressive.
+            if bh <= 200 and h < img_h_scaled * 0.12:
                 continue
 
             aspect = w / float(h)
@@ -257,11 +272,45 @@ class CardDetector:
                 continue
 
             # Filter rectangle by aspect ratio (cards are taller than wide)
-            if 0.4 <= aspect <= 1.1:
+            # Permissive here — action_parser adds stricter river-specific filters
+            if 0.4 <= aspect <= 1.0:
                 rects.append((x, y, w, h))
 
         # Sort left -> right by center_x instead of raw x to handle slight overlaps safely
         rects = sorted(rects, key=lambda r: r[0] + r[2] / 2.0)
+
+        # Merge fragment rects that are parts of the same card (e.g. Q split by threshold)
+        # Two rects merge if they overlap horizontally AND are close vertically
+        merged = True
+        while merged:
+            merged = False
+            new_rects = []
+            used = set()
+            for i in range(len(rects)):
+                if i in used:
+                    continue
+                x1, y1, w1, h1 = rects[i]
+                for j in range(i + 1, len(rects)):
+                    if j in used:
+                        continue
+                    x2, y2, w2, h2 = rects[j]
+                    # Check horizontal overlap
+                    overlap_x = min(x1 + w1, x2 + w2) - max(x1, x2)
+                    # Check vertical proximity (gap < 15px scaled)
+                    gap_y = max(0, max(y1, y2) - min(y1 + h1, y2 + h2))
+                    if overlap_x > min(w1, w2) * 0.5 and gap_y < 15:
+                        # Merge into bounding rect
+                        mx = min(x1, x2)
+                        my = min(y1, y2)
+                        mx2 = max(x1 + w1, x2 + w2)
+                        my2 = max(y1 + h1, y2 + h2)
+                        rects[i] = (mx, my, mx2 - mx, my2 - my)
+                        x1, y1, w1, h1 = rects[i]
+                        used.add(j)
+                        merged = True
+                if i not in used:
+                    new_rects.append(rects[i])
+            rects = new_rects
 
         # Scale back down to original coordinates
         final_rects = []
@@ -288,7 +337,7 @@ class CardDetector:
             for group in groups:
                 # Calculate average Y-center of group
                 g_avg_y = sum(r[1] + r[3] / 2 for r in group) / len(group)
-                if abs(ry_center - g_avg_y) < 30: # Variance threshold 30px
+                if abs(ry_center - g_avg_y) < 50: # Variance threshold 50px
                     group.append(rect)
                     found_group = True
                     break
@@ -322,7 +371,7 @@ class CardDetector:
             
             logger.debug(f"[Brain] Group {i}: raw={len(g)}, clean={len(clean_g)}, median_h={median_h:.1f}")
             
-            if 2 <= len(clean_g) <= 6:
+            if min_group_size <= len(clean_g) <= 6:
                 # Spacing regularity check: gaps between cards should be roughly uniform
                 if len(clean_g) >= 3:
                     gaps = []
@@ -385,28 +434,32 @@ class CardDetector:
         passes = [("original", card_crop)]
         
         try:
-            # Pass 2: CLAHE contrast enhancement
-            gray = cv2.cvtColor(card_crop, cv2.COLOR_BGR2GRAY)
+            h, w = card_crop.shape[:2]
+            
+            # Pass 2: Always upscale (even 60x90 is too small for PaddleOCR)
+            scale = max(2.0, 160 / max(h, 1))
+            upscaled = cv2.resize(card_crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            passes.append(("upscaled", upscaled))
+            
+            # Pass 3: CLAHE contrast enhancement on upscaled
+            gray = cv2.cvtColor(upscaled, cv2.COLOR_BGR2GRAY)
             clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
             enhanced = clahe.apply(gray)
             enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
             passes.append(("clahe", enhanced_bgr))
             
-            # Pass 3: Upscaled (for very small cards)
-            h, w = card_crop.shape[:2]
-            if h < 60 or w < 40:
-                scale = max(2.0, 120 / max(h, 1))
-                upscaled = cv2.resize(card_crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-                passes.append(("upscaled", upscaled))
+            # Pass 4: Inverted (for dark background cards like river column)
+            inverted = cv2.bitwise_not(upscaled)
+            passes.append(("inverted", inverted))
         except Exception as e:
             logger.warning(f"[CardDetector] OCR pass generation error: {e}")
         
         return passes
 
     # ── Main detection entry point ──
-    def detect_cards_with_info(self, board_img, ocr_engine=None, game_phase=None):
+    def detect_cards_with_info(self, board_img, ocr_engine=None, game_phase=None, min_group_size=2):
         results = []
-        all_groups = self._detect_card_rects(board_img)
+        all_groups = self._detect_card_rects(board_img, min_group_size=min_group_size)
 
         if not all_groups:
             logger.warning("[CardDetector] No card groups found by Brain.")
@@ -421,9 +474,18 @@ class CardDetector:
             for idx, rect in enumerate(group_rects):
                 card_crop = self._center_crop(board_img, rect)
                 
+                # Also keep ORIGINAL (non-normalized) crop for OCR — avoids blur from upscaling small cards to 60x90
+                x, y, w, h = rect
+                bh, bw = board_img.shape[:2]
+                pad = 3
+                x1, y1 = max(0, x - pad), max(0, y - pad)
+                x2, y2 = min(bw, x + w + pad), min(bh, y + h + pad)
+                raw_crop = board_img[y1:y2, x1:x2]
+                
                 # Recognition: Template first, OCR fallback
                 name, conf, matched_file = self._match_template(card_crop)
                 if name:
+                    # Trust template fully — rank + suit both come from the learned template
                     logger.info(f"[CardDetector] Row {g_idx} Slot {idx}: matched '{name}' (conf={conf:.2f})")
                     results.append({
                         'name': name, 
@@ -446,11 +508,11 @@ class CardDetector:
                     meta['last_used'] = time.time()
                 elif ocr_engine is not None:
                     try:
-                        # Multi-pass OCR for better cold-start accuracy
+                        # Multi-pass OCR — use RAW crop (not normalized) to preserve sharpness
                         best_txt = '??'
                         best_conf = 0.0
                         
-                        for pass_name, pass_img in self._get_ocr_passes(card_crop):
+                        for pass_name, pass_img in self._get_ocr_passes(raw_crop):
                             padded = cv2.copyMakeBorder(pass_img, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=[255, 255, 255])
                             res = ocr_engine.ocr(padded, cls=True)  # type: ignore[union-attr]
                             if res and res[0]:
@@ -594,10 +656,10 @@ class CardDetector:
         matches.sort(key=lambda x: x['score'], reverse=True)
         top_matches = matches[:3]
 
-        if top_matches and top_matches[0]['score'] >= 0.70:
+        if top_matches and top_matches[0]['score'] >= 0.92:
             votes = {}
             for m in top_matches:
-                if m['score'] >= 0.65:
+                if m['score'] >= 0.85:
                     # e.g., Ah_auto -> Ah
                     base_label = m['label'].split('_')[0]
                     votes[base_label] = votes.get(base_label, 0) + m['score']
@@ -613,6 +675,10 @@ class CardDetector:
                 
                 # Return best_label, best_score, and the actual filename of the top match for error reporting
                 return best_label, best_score, top_matches[0]['label']
+        
+        # Debug: log why template matching failed
+        if top_matches:
+            logger.warning(f"[MATCH FAIL] Best: {top_matches[0]['label']} raw={top_matches[0].get('raw',0):.3f} final={top_matches[0]['score']:.3f} (threshold=0.92)")
 
         return None, 0.0, None
 
