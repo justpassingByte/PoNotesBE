@@ -733,6 +733,7 @@ class CardDetector:
         # Normalize before save - DO NOT do a tight contour crop, because matchTemplate needs the same aspect ratio as the source slot
         cropped_norm = cv2.resize(card_img, self.TARGET_CARD_SIZE, interpolation=cv2.INTER_AREA)
 
+        os.makedirs(self.templates_dir, exist_ok=True)
         path = os.path.join(self.templates_dir, filename)
         cv2.imwrite(path, cropped_norm)
         
