@@ -51,20 +51,24 @@ export class HandService {
             const rawData = ocrResponse.data || ocrResponse;
             const playersMap = new Map<string, any>();
             
-            // Build players from streets
+            // Build players from streets (Robust extraction of position and identity)
             Object.values(rawData.streets || {}).forEach((actions: any[]) => {
+                if (!Array.isArray(actions)) return;
                 actions.forEach(act => {
-                    const cleanName = typeof act.player === 'string' ? act.player.trim() : act.player;
-                    if (!cleanName) return;
+                    const rawPlayer = act.player;
+                    const cleanName = typeof rawPlayer === 'string' ? rawPlayer.trim() : (rawPlayer?.name || String(rawPlayer || ''));
+                    if (!cleanName || cleanName === 'undefined') return;
+                    
+                    const pos = act.pos || act.position || undefined;
+
                     if (!playersMap.has(cleanName)) {
                         playersMap.set(cleanName, {
                             name: cleanName,
-                            position: act.pos || undefined,
-                            stack: undefined, // OCR doesn't reliably give stacks yet
+                            position: pos,
                             hole_cards: []
                         });
-                    } else if (act.pos) {
-                        playersMap.get(cleanName).position = act.pos;
+                    } else if (pos && !playersMap.get(cleanName).position) {
+                        playersMap.get(cleanName).position = pos;
                     }
                 });
             });
@@ -73,29 +77,33 @@ export class HandService {
             const potStr = rawData.pot ? String(rawData.pot).replace(/[^\d.]/g, '') : '0';
 
             const parseAmount = (amt: any): number | undefined => {
-                if (!amt) return undefined;
+                if (amt === undefined || amt === null) return undefined;
                 if (typeof amt === 'number') return amt;
                 const match = String(amt).replace(',', '.').match(/([+\-]?\d[\d\.]*)/);
                 return match ? parseFloat(match[1]) : undefined;
             };
 
             const mapActions = (streetActions: any[]) => {
-                if (!streetActions) return [];
+                if (!Array.isArray(streetActions)) return [];
                 return streetActions.map(act => {
                     let standardAction = act.action?.toLowerCase() || '';
-                    if (standardAction.includes('tố') || standardAction === 'raise') standardAction = 'raise';
-                    else if (standardAction.includes('cược') || standardAction === 'bet') standardAction = 'bet';
-                    else if (standardAction.includes('theo') || standardAction === 'call') standardAction = 'call';
+                    // Robust mapping for Vietnamese and fallback terms
+                    if (standardAction.includes('tố') || standardAction.includes('raise')) standardAction = 'raise';
+                    else if (standardAction.includes('cược') || standardAction.includes('bet')) standardAction = 'bet';
+                    else if (standardAction.includes('theo') || standardAction.includes('call')) standardAction = 'call';
                     else if (standardAction.includes('bỏ bài') || standardAction.includes('fold')) standardAction = 'fold';
-                    else if (standardAction.includes('check') || standardAction.includes('xem')) standardAction = 'check';
+                    else if (standardAction.includes('check') || standardAction.includes('xem') || standardAction.includes('kiểm tra')) standardAction = 'check';
                     else if (standardAction.includes('all') || standardAction.includes('in')) standardAction = 'all-in';
                     else if (standardAction.includes('post') || standardAction.includes('sb') || standardAction.includes('bb')) standardAction = 'post';
 
+                    const rawPlayer = act.player;
+                    const playerName = typeof rawPlayer === 'string' ? rawPlayer.trim() : (rawPlayer?.name || String(rawPlayer || 'Hero'));
+
                     return {
-                        player: act.player,
+                        player: playerName,
+                        position: act.pos || act.position || undefined,
                         action: standardAction,
                         amount: parseAmount(act.amount),
-                        position: act.pos || undefined,
                     };
                 });
             };
