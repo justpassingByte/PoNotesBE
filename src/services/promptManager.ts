@@ -51,8 +51,8 @@ export function buildHandAnalysisPrompt(
   },
   playerContext?: string
 ): string {
-  const style = settings?.hand_style || 'Balanced';
-  const aggression = settings?.hand_aggression_bias ?? 50;
+  const style = settings?.hand_style || 'Exploit'; // Exploit First default
+  const aggression = settings?.hand_aggression_bias ?? 85; // Exploit First default
   const depth = settings?.hand_insight_depth || 'Deep';
   const toggles = settings?.hand_behavior_toggles || {};
 
@@ -216,13 +216,41 @@ export function buildProfilePrompt(
     return customPrompt;
   }
 
-  const style = settings?.ai_style || 'Balanced';
-  const aggression = settings?.aggression_bias ?? 50;
+  const style = settings?.ai_style || 'Exploit'; // Exploit First default
+  const aggression = settings?.aggression_bias ?? 85; // Exploit First default
   const depth = settings?.insight_depth || 'Deep';
   const toggles = settings?.behavior_toggles || {};
 
+  // Aggression Mapping for Profiling
+  let aggressionRules = "";
+  if (aggression > 70) {
+    aggressionRules = `
+[TACTICAL_STANCE]: POLARIZED PRESSURE / MAX EXPLOIT.
+- Suggest wide value ranges. 
+- Target leaks with 80-100% frequency.
+- Prioritize EV extraction over balance.`;
+  } else if (aggression < 40) {
+    aggressionRules = `
+[TACTICAL_STANCE]: CONSERVATIVE / LOW VARIANCE.
+- Suggest tight, robust ranges. 
+- Avoid high-risk exploits unless data is extremely high confidence.`;
+  } else {
+    aggressionRules = `
+[TACTICAL_STANCE]: BALANCED / STANDARD. Use GTO baselines for strategy generation.`;
+  }
+
   const configBlock = `
 # POKER EXPLOIT ENGINE — COMPACT PRO VERSION (OPTIMIZED)
+
+### AI CONFIGURATION (UNTOUCHABLE SOURCE OF TRUTH):
+- [STYLE]: ${style}
+- [AGGRESSION_BIAS]: ${aggression}%
+- [ANALYTICAL_DEPTH]: ${depth}
+
+### TACTICAL EXECUTION PROTOCOLS:
+${aggressionRules}
+- [MODIFIER]: ${style === 'Exploit' ? 'FORCE_EXPLOIT_ENABLED' : 'STANDARD_MIX'}
+- [DEPTH_CONSTRAINT]: ${depth}
 
 ---
 
