@@ -123,7 +123,7 @@ def test_pipeline(img_path="ocrtest2.png"):
     if 'pot_area' in regions:
         pot_img = layout_engine.crop_region(img, regions['pot_area'])
         cv2.imwrite("debug_crop_pot.png", pot_img)
-        pot_res = ocr.ocr(pot_img, cls=True)
+        pot_res = ocr.ocr(pot_img, cls=False)
         raw_pot = pot_res[0][0][1][0] if pot_res and pot_res[0] else ""
     print(f"  Raw: '{raw_pot}'")
     pot_value = parse_bb_value(greedy_pot(raw_pot))
@@ -141,7 +141,7 @@ def test_pipeline(img_path="ocrtest2.png"):
         ah, aw = action_img.shape[:2]
         print(f"  Crop size: {aw}x{ah}")
 
-        action_ocr = ocr.ocr(action_img, cls=True)
+        action_ocr = ocr.ocr(action_img, cls=False)
 
         # Calculate sidebar boundary in action_img coordinates
         sidebar_x = None

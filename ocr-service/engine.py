@@ -112,7 +112,7 @@ class LayoutEngine:
         ocr_results = []
         if ocr_engine:
             try:
-                res = ocr_engine.ocr(image, cls=True)
+                res = ocr_engine.ocr(image, cls=False)
                 if res and res[0]:
                     ocr_results = res[0]
             except Exception as e:
@@ -525,7 +525,7 @@ class CardDetector:
                         
                         for pass_name, pass_img in self._get_ocr_passes(raw_crop):
                             padded = cv2.copyMakeBorder(pass_img, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=[255, 255, 255])
-                            res = ocr_engine.ocr(padded, cls=True)  # type: ignore[union-attr]
+                            res = ocr_engine.ocr(padded, cls=False)  # type: ignore[union-attr]
                             if res and res[0]:
                                 for line in res[0]:
                                     raw_txt = line[1][0].strip().replace(' ', '')

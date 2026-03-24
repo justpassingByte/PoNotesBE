@@ -92,7 +92,7 @@ def process_hand(image_hex: str, image_hash: str):
         if not match:
             t_fail = time.time()
             logger.warning(f"[tasks] No layout matched for {image_hash}. Falling back to raw OCR.")
-            results = ocr.ocr(img, cls=True)
+            results = ocr.ocr(img, cls=False)
             return {
                 "status": "success",
                 "site": "unknown",
@@ -187,7 +187,7 @@ def process_hand(image_hex: str, image_hash: str):
         raw_pot_text = ""
         if 'pot_area' in regions:
             pot_img = layout_engine.crop_region(img, regions['pot_area'])
-            pot_res = ocr.ocr(pot_img, cls=True)
+            pot_res = ocr.ocr(pot_img, cls=False)
             raw_pot_text = pot_res[0][0][1][0] if pot_res and pot_res[0] else ""
 
         # 9. Action Log Parsing (5-phase matrix from action_parser.py)
@@ -195,7 +195,7 @@ def process_hand(image_hex: str, image_hash: str):
         street_pots = {}
         if 'action_log' in regions:
             action_img = layout_engine.crop_region(img, regions['action_log'])
-            action_ocr = ocr.ocr(action_img, cls=True)
+            action_ocr = ocr.ocr(action_img, cls=False)
 
             # Calculate sidebar boundary in action_img coordinates
             sidebar_x = None
@@ -239,7 +239,7 @@ def process_hand(image_hex: str, image_hash: str):
                         known_players.add(e['player'])
 
             # OCR the showdown area to find player name text near each card group
-            sd_ocr_results = ocr.ocr(showdown_img, cls=True)
+            sd_ocr_results = ocr.ocr(showdown_img, cls=False)
             sd_text_boxes: list = []
             if sd_ocr_results and sd_ocr_results[0]:
                 for line in sd_ocr_results[0]:
