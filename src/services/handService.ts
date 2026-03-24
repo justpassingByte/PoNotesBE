@@ -357,7 +357,7 @@ export class HandService {
             const { job_id } = await response.json();
             console.log(`[OCR_ENGINE] Sent visual payload. Job ID: ${job_id}. Waiting for core...`);
 
-            for (let i = 0; i < 20; i++) {
+            for (let i = 0; i < 30; i++) {
                 const poll = await fetch(`${ocrServiceUrl}/result/${job_id}`);
                 const data = await poll.json();
                 if (data.status === 'success') {
