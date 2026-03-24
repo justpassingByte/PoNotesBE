@@ -59,21 +59,32 @@ def get_suit_from_color(roi):
         return 's'
     
     # Focus on top 60% of card where rank+suit symbol are (avoid bottom noise)
-    h = roi.shape[0]
+    h, w = roi.shape[:2]
     top_region = roi[:int(h * 0.6), :]
     
     hsv = cv2.cvtColor(top_region, cv2.COLOR_BGR2HSV)
-    # Lower V threshold (30 instead of 50) to catch colored elements on dark backgrounds
+    total_pixels = top_region.shape[0] * top_region.shape[1]
+    
+    # Color ranges in HSV
     lower_red1, upper_red1 = np.array([0, 40, 30]),   np.array([10, 255, 255])
     lower_red2, upper_red2 = np.array([170, 40, 30]), np.array([180, 255, 255])
     lower_blue, upper_blue  = np.array([100, 40, 30]), np.array([130, 255, 255])
     lower_green, upper_green = np.array([40, 40, 30]),  np.array([90, 255, 255])
+    
     mask_red   = cv2.inRange(hsv, lower_red1, upper_red1) | cv2.inRange(hsv, lower_red2, upper_red2)
     mask_blue  = cv2.inRange(hsv, lower_blue, upper_blue)
     mask_green = cv2.inRange(hsv, lower_green, upper_green)
+    
     counts = {'h': cv2.countNonZero(mask_red), 'd': cv2.countNonZero(mask_blue), 'c': cv2.countNonZero(mask_green)}
     best_suit = max(counts, key=lambda k: counts[k])
-    return best_suit if counts[best_suit] >= 2 else 's'
+    best_count = counts[best_suit]
+    
+    # Need at least 20 colored pixels AND >1% of total area to be confident
+    # Otherwise default to spades (black/dark suit)
+    min_pixels = max(20, int(total_pixels * 0.01))
+    
+    logger.debug(f"[SuitColor] h={counts['h']} d={counts['d']} c={counts['c']} total={total_pixels} min={min_pixels} -> {'s' if best_count < min_pixels else best_suit}")
+    return best_suit if best_count >= min_pixels else 's'
 
 # ─────────────────────────────────────────────
 # LayoutEngine
@@ -525,13 +536,16 @@ class CardDetector:
                                         best_conf = conf
                         
                         if best_txt != '??':
-                            # Add suit detection
+                            # Add suit detection (unreliable — color-based)
                             suit = get_suit_from_color(card_crop)
                             name_with_suit = f"{best_txt}{suit}"
-                            logger.info(f"[CardDetector] Row {g_idx} Slot {idx} OCR: '{name_with_suit}' (conf={best_conf:.2f})")
+                            # Cap confidence to ALWAYS trigger interactive correction
+                            # OCR rank + color-based suit is unreliable, let user verify
+                            capped_conf = min(best_conf, 0.50)
+                            logger.info(f"[CardDetector] Row {g_idx} Slot {idx} OCR: '{name_with_suit}' (raw_conf={best_conf:.2f}, capped={capped_conf:.2f})")
                             results.append({
                                 'name': name_with_suit,
-                                'confidence': best_conf,
+                                'confidence': capped_conf,
                                 'image': card_crop,
                                 'is_new': True,
                                 'row': g_idx,
@@ -705,12 +719,19 @@ class CardDetector:
     def learn_card(self, card_img, card_name, verification_source='auto', failed_cases_dir="failed_cases", layout_name=None):
         """
         Safe self-learning with:
+        - Card name validation (must be valid rank+suit)
         - Verification source check (high_confidence | user_confirmed | user_corrected)
         - Tight contour crop before saving
         - Failed case logging for rejected/unverified data
         - last_used timestamp stored for decay ranking
         """
         if not self.enable_learning:
+            return
+        
+        # Validate card name — must be a real poker card (e.g. Ah, Ks, Td, 10c)
+        import re
+        if not re.match(r'^(?:10|[2-9TJQKA])[hdcs]$', card_name, re.IGNORECASE):
+            logger.warning(f"[CardDetector] Rejected learn for '{card_name}' — invalid card name (must be rank+suit, e.g. Ah, Ks, Td).")
             return
             
         suffix = "_auto" if verification_source == 'high_confidence' else "_user"

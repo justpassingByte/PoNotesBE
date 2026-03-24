@@ -59,48 +59,6 @@ def detect_game_phase(board_cards: list) -> str:
     if count == 4: return "turn"
     return "river"
 
-# ─── User Feedback Task ────────────────────────────────────────────────────────
-
-@celery_app.task(name="tasks.apply_feedback")
-def apply_feedback(image_hex: str, card_name: str, action: str, corrected_name: str = "", card_index: int = None):
-    """
-    Process user feedback on card detection.
-    - confirm: mark card as correct, learn template with 'user_confirmed'
-    - edit: user corrected the card name, learn template with 'user_corrected'  
-    - reject: mark card as wrong, penalize template
-    """
-    try:
-        # Decode image from hex
-        image_bytes = bytes.fromhex(image_hex)
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        card_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        if card_img is None:
-            logger.error(f"[Feedback] Failed to decode image for card '{card_name}'")
-            return {"status": "error", "detail": "Failed to decode image"}
-
-        if action == "confirm":
-            card_detector.learn_card(card_img, card_name, verification_source='user_confirmed')
-            logger.info(f"[Feedback] Confirmed and learned: {card_name}")
-            return {"status": "learned", "card": card_name}
-            
-        elif action == "edit":
-            final_name = corrected_name or card_name
-            card_detector.learn_card(card_img, final_name, verification_source='user_corrected')
-            logger.info(f"[Feedback] User corrected: {card_name} → {final_name}")
-            return {"status": "learned", "card": final_name, "original": card_name}
-            
-        elif action == "reject":
-            card_detector.report_error(card_name)
-            logger.info(f"[Feedback] Rejected: {card_name}")
-            return {"status": "rejected", "card": card_name}
-        
-        return {"status": "unknown_action", "action": action}
-        
-    except Exception as e:
-        logger.error(f"[Feedback] Error: {e}")
-        return {"status": "error", "detail": str(e)}
-
 
 # ─── Main Celery Task ──────────────────────────────────────────────────────────
 
@@ -238,7 +196,21 @@ def process_hand(image_hex: str, image_hash: str):
         if 'action_log' in regions:
             action_img = layout_engine.crop_region(img, regions['action_log'])
             action_ocr = ocr.ocr(action_img, cls=True)
-            parsed_actions = action_parser.parse(action_img, action_ocr, card_detector, ocr)
+
+            # Calculate sidebar boundary in action_img coordinates
+            sidebar_x = None
+            if 'sidebar' in regions:
+                ah, aw = action_img.shape[:2]
+                sidebar_x1_ratio = regions['sidebar']['x1']
+                action_x1_ratio = regions['action_log']['x1']
+                action_x2_ratio = regions['action_log']['x2']
+                action_range = action_x2_ratio - action_x1_ratio
+                sidebar_x = int((sidebar_x1_ratio - action_x1_ratio) / action_range * aw) if action_range > 0 else None
+
+            parsed_actions = action_parser.parse(
+                action_img, action_ocr, card_detector, ocr,
+                sidebar_x=sidebar_x, layout_name=layout_name
+            )
             streets_data = parsed_actions['streets']
             street_pots = parsed_actions['street_pots']
 
@@ -452,6 +424,7 @@ def apply_feedback(
         
         layout, _ = match
         regions = layout['regions']
+        layout_name = layout.get('name')
         
         # We focus on board cards for learning for now
         if 'board_cards' not in regions:
@@ -481,11 +454,11 @@ def apply_feedback(
             if card_name == "all_board":
                 for item in fb_card_info:
                     if item['name'] != '??':
-                        card_detector.learn_card(item['image'], item['name'], verification_source='user_confirmed')
+                        card_detector.learn_card(item['image'], item['name'], verification_source='user_confirmed', layout_name=layout_name)
                 logger.info(f"[feedback] User CONFIRMED ALL BOARD CARDS → {len(fb_card_info)} templates reinforced.")
             elif card_index is not None and card_index < len(fb_card_info):
                 item = fb_card_info[card_index]
-                card_detector.learn_card(item['image'], item['name'], verification_source='user_confirmed')
+                card_detector.learn_card(item['image'], item['name'], verification_source='user_confirmed', layout_name=layout_name)
                 logger.info(f"[feedback] User CONFIRMED '{item['name']}' → template reinforced.")
             return {"status": "ok", "action": action, "card": card_name}
 
@@ -498,7 +471,7 @@ def apply_feedback(
                     card_detector.report_error(bad_filename)
                 
                 # Learn the new one
-                card_detector.learn_card(bad_item['image'], corrected_name, verification_source='user_corrected')
+                card_detector.learn_card(bad_item['image'], corrected_name, verification_source='user_corrected', layout_name=layout_name)
                 logger.info(f"[feedback] User CORRECTED index {card_index} to '{corrected_name}'.")
             return {"status": "ok", "action": action, "card": corrected_name}
 
@@ -508,7 +481,8 @@ def apply_feedback(
                 board_img if 'board_img' in locals() else img, 
                 card_name,
                 verification_source='rejected',
-                failed_cases_dir="failed_cases"
+                failed_cases_dir="failed_cases",
+                layout_name=layout_name
             )
             logger.info(f"[feedback] User REJECTED '{card_name}' → logged to failed_cases/.")
             return {"status": "ok", "action": "reject", "card": card_name}

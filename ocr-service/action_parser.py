@@ -28,7 +28,7 @@ STREET_KEYS = ["blinds_ante", "preflop", "flop", "turn", "river"]
 
 POS_TAGS = [
     "sb", "bb", "btn", "utg", "utg+1", "utg+2",
-    "hj", "co", "str", "ante", "mp", "mp1", "bb+", "str+1",
+    "hj", "co", "ante", "mp", "mp1", "bb+",
     # Common OCR misreads:
     "utg-1", "utg-2", "utg 1", "utg 2",  # '+' read as '-' or space
     "hi", "h]", "hj.",                     # 'HJ' misreads
@@ -54,21 +54,26 @@ def normalize_pos(text: str) -> str:
     return _POS_NORMALIZE.get(low, text.strip().upper())
 
 ACTIONS_LIST = [
-    "kiểm tra",                     #Check
+    "kiểm tra", "kiem tra",         # Check (with/without diacritics)
     "cược", "cuoc", "cugc",        # BET (Vietnamese + OCR typos)
     "tố", "to", "tốt", "tot", "t6", # RAISE (OCR might read "Tố" as "Tốt" or "T6")
     "theo",                         # CALL
     "bỏ bài", "bo bai", "b6 bai",  # FOLD
     "check", "fold", "call", "raise", "all-in",
-    "tất tay",                      # ALL-IN
+    "tất tay", "tố tất", "to tat", # ALL-IN variants
+    "cược ante", "cuoc ante",       # Ante posting action
+    "str", "straddle",              # Straddle (forced bet, NOT a position)
 ]
 
 WINNER_KEYWORDS = ["winner", "thắng", "win", "won"]
 
 # Text that should never be treated as a player name
 NOISE_KEYWORDS = [
-    "winner", "pot", "total", "ante", "blind",
-    "pre-flop", "flop", "turn", "river", "cuộc ante",
+    "winner", "pot", "total",
+    "pre-flop", "flop", "turn", "river",
+    "bảo hiểm", "bao hiem",        # Insurance — not a player
+    "tố tất", "to tat",            # All-in badge text
+    "jp",                           # Jackpot label
 ]
 
 
@@ -85,12 +90,19 @@ def greedy_pot(s):
     return m.group(1).strip() if m else "0"
 
 
+# Currency markers recognized across BB, USD, and CNY formats
+CURRENCY_MARKERS = ["bb", "$", "¥", "元"]
+
+def has_currency_marker(text_lower):
+    """Check if text contains any known currency marker (BB, $, ¥, 元)."""
+    return any(c in text_lower for c in CURRENCY_MARKERS)
+
 def is_money_text(text_lower):
-    """Check if text is money/amount (BB, $, +, -, %). Exclude percentage-only values."""
+    """Check if text is money/amount (BB, $, ¥, +, -, %). Exclude percentage-only values."""
     # Pure percentage (e.g. "5%", "99%") is NOT a bet amount
     if re.match(r'^\d+%$', text_lower.strip()):
         return False
-    return any(c in text_lower for c in ["bb", "$", "+", "-"]) and text_lower not in POS_TAGS
+    return (has_currency_marker(text_lower) or any(c in text_lower for c in ["+", "-"])) and text_lower not in POS_TAGS
 
 
 def is_signed_amount(text_lower):
@@ -99,9 +111,13 @@ def is_signed_amount(text_lower):
 
 
 def parse_bb_value(text):
-    """Extract numeric BB value from text like '1.947 BB', '+1,128 BB'.
+    """Extract numeric value from text like '1.947 BB', '+1,128 BB', '$ 65,90', '$3.40', '¥100'.
+    Handles BB, USD ($), and CNY (¥/元) formats.
     Handles European-style thousands separators (1.947 = 1947, not 1.947)."""
-    clean = text.strip().lower().replace("bb", "").replace("+", "").replace("-", "").strip()
+    clean = text.strip().lower()
+    for marker in ["bb", "$", "¥", "元", "+", "-"]:
+        clean = clean.replace(marker, "")
+    clean = clean.strip()
     clean = re.sub(r'\s+', '', clean)
     # Detect thousands separator: X.XXX or X,XXX pattern (exactly 3 digits after separator)
     if re.match(r'^\d{1,3}[.,]\d{3}$', clean):
@@ -242,6 +258,12 @@ class ActionLogParser:
                         if mean_val < 120:
                             logger.info(f"[ActionParser] Card {idx}: SKIPPED (Dark FOLD card, mean={mean_val:.1f})")
                             continue
+                        # Filter: reject smooth icons/avatars — real cards have sharp text edges
+                        edges = _cv2.Canny(gray_card, 50, 150)
+                        edge_ratio = float(edges.sum() / 255) / max(edges.size, 1)
+                        if edge_ratio < 0.03:
+                            logger.info(f"[ActionParser] Card {idx}: SKIPPED (smooth icon/avatar, edge_ratio={edge_ratio:.4f})")
+                            continue
                     
 
                     # Interactive: ask user to correct ?? or low-confidence river cards
@@ -249,12 +271,15 @@ class ActionLogParser:
                         try:
                             user_input = input(f"  [?] River card {idx} is '{c['name']}'. Correct name (e.g. Qs) or Enter to skip: ").strip()
                             if user_input:
-                                c['name'] = user_input
-                                c['confidence'] = 1.0
-                                if c.get('image') is not None:
-                                    # Use a default layout_name='River_Interactive' if None passed, but parse takes layout_name?
-                                    card_detector.learn_card(c['image'], user_input, verification_source='user_corrected')
-                                    print(f"  [LEARN] User taught river card: {user_input}")
+                                # Validate: must be a valid card name (rank+suit, e.g. Ah, Ks, Td)
+                                if not re.match(r'^(?:10|[2-9TJQKA])[hdcs]$', user_input, re.IGNORECASE):
+                                    logger.debug(f"Invalid card name '{user_input}'. Must be rank+suit (e.g. Qs, Ah, Td). Skipping.")
+                                else:
+                                    c['name'] = user_input
+                                    c['confidence'] = 1.0
+                                    if c.get('image') is not None:
+                                        card_detector.learn_card(c['image'], user_input, verification_source='user_corrected', layout_name=layout_name)
+                                        logger.info(f"[LEARN] User taught river card: {user_input}")
                         except EOFError:
                             pass
                     
@@ -282,36 +307,49 @@ class ActionLogParser:
                 continue
 
             # Skip pure noise keywords
-            if text.strip().lower() in NOISE_KEYWORDS:
+            t_lower = text.strip().lower()
+            if t_lower in NOISE_KEYWORDS:
+                continue
+            # Skip percentage values (win equity like 20%, 98%) — not player names
+            if re.match(r'^\d{1,3}%$', t_lower):
+                continue
+            # Skip insurance/jackpot labels (e.g. 'JP:$ 1,026')
+            if t_lower.startswith('jp'):
                 continue
 
             col_idx = min(range(5), key=lambda i: abs(x_c - header_centers[i]))
             buckets[col_idx].append({"text": text, "y": y_c, "bbox": box[0]})
 
         # ═══ Phase 4: Sequential Merge (Vertical Stack) ═══
+        player_counter = 0  # Auto-name counter for mobile (no player names, only positions)
+        pos_to_player = {}  # Cross-street dedup: same position = same player
         for i, bucket in enumerate(buckets):
             bucket.sort(key=lambda b: b['y'])
             street_key = STREET_KEYS[i]
             current_entry = {}
-            total_blind_sum = 0.0
             pot_found = False
+            pending_action = ""   # Buffer for orphan action found before position badge
+            pending_amount = ""   # Buffer for orphan amount found before position badge
 
             for item in bucket:
                 line = item['text']
                 l_clean = line.strip().lower()
 
                 # Skip pure header text (street names without amounts)
+                # "Cược Ante" in col 0 (blinds_ante) is a header; in other cols it's an action
+                is_ante_action = (i > 0) and any(kw in l_clean for kw in ["cược", "cuộc", "cuoc"])
                 is_header = (
                     any(kw in l_clean for kw in ["blind", "ante", "pre-flop", "flop", "turn", "river"])
                     and len(l_clean) < 15
+                    and not is_ante_action  # Don't filter "Cược Ante" as header in non-blind columns
                 )
                 if is_header:
-                    has_bb_amount = bool(re.search(r'\d', l_clean)) and "bb" in l_clean
+                    has_bb_amount = bool(re.search(r'\d', l_clean)) and has_currency_marker(l_clean)
                     if not has_bb_amount:
                         continue
 
-                # Pot detection: first BB line in col 1-4, before any player
-                if i > 0 and "bb" in l_clean and not current_entry and not pot_found and len(l_clean) < 20:
+                # Pot detection: first $amount in any col, before any player
+                if has_currency_marker(l_clean) and not current_entry and not pot_found and len(l_clean) < 20:
                     if re.search(r'\d', l_clean):
                         street_pots[street_key] = line
                         pot_found = True
@@ -326,13 +364,49 @@ class ActionLogParser:
                 is_money = (is_money_text(l_clean) or is_signed_amount(l_clean)) and not is_pos
                 is_winner = any(wk in l_clean for wk in WINNER_KEYWORDS)
 
+                # DEBUG: Show raw OCR ordering for key columns
+                if i <= 1 or i == 4:  # blinds_ante, preflop, and river buckets
+                    tag = "POS" if is_pos else "ACT" if is_action else "$$" if is_money else "WIN" if is_winner else "HDR" if is_header else "???"
+                    cur_player = current_entry.get('player', 'NONE')
+                    col_name = {0: "BLIND", 1: "PREFL", 4: "RIVER"}.get(i, f"COL{i}")
+                    logger.debug(f"[DBG {col_name}] Y={item['y']:4.0f} [{tag:3s}] '{line}' | cur={cur_player} pend_act='{pending_action}' pend_amt='{pending_amount}'")
+
                 # State-Based Merging
-                # Player name: not pos/action/money/winner, length >= 3, not a position tag
+                # Position tag: on mobile layout, position IS the start of a new entry
+                # (mobile has no player names, only pos badges like UTG, CO, MP)
+                if is_pos:
+                    norm_pos = normalize_pos(line)
+                    # Dedup: if current entry has same pos and is within ~50px Y, merge
+                    if (current_entry.get('pos') == norm_pos
+                            and abs(current_entry.get('_y', 0) - item['y']) < 50):
+                        continue  # Skip duplicate position badge
+                    if current_entry.get('player'):
+                        streets_data[street_key].append(current_entry)
+                    # Cross-street dedup: same position = same player
+                    if norm_pos not in pos_to_player:
+                        player_counter += 1
+                        pos_to_player[norm_pos] = f"Player{player_counter}"
+                    current_entry = {
+                        "player": pos_to_player[norm_pos], "pos": norm_pos,
+                        "action": "", "amount": "", "hand": [],
+                        "_y": item['y']
+                    }
+                    # If there's a pending action from a previous orphan line, assign it now
+                    if pending_action:
+                        current_entry['action'] = pending_action
+                        pending_action = ""
+                    if pending_amount:
+                        current_entry['amount'] = pending_amount
+                        pending_amount = ""
+                    continue
+
+                # Player name: not pos/action/money/winner, length >= 3, not noise
                 is_likely_player = (
                     not is_pos and not is_action and not is_money and not is_winner
                     and len(l_clean) >= 3
-                    and not re.match(r'^\d{1,2}$', l_clean)
+                    and not re.match(r'^\d{1,3}%?$', l_clean)
                     and l_clean not in NOISE_KEYWORDS
+                    and not l_clean.startswith('jp')
                 )
                 if is_likely_player:
                     # New player name detected
@@ -355,10 +429,12 @@ class ActionLogParser:
                         ACTION_MAP = {
                             "cược": ["cược", "cuoc", "cugc"],
                             "tố": ["tố", "to", "tot", "tốt", "t6"],
-                            "chi check": ["kiểm tra", "check"],
+                            "check": ["kiểm tra", "kiem tra", "check"],
                             "theo": ["theo", "call"],
                             "bỏ bài": ["bỏ bài", "bo bai", "b6 bai", "fold"],
-                            "all-in": ["all-in", "tất tay"]
+                            "all-in": ["all-in", "tất tay", "tố tất", "to tat"],
+                            "ante": ["cược ante", "cuoc ante"],
+                            "straddle": ["str", "straddle"],
                         }
                         
                         for std_act, variants in ACTION_MAP.items():
@@ -378,45 +454,80 @@ class ActionLogParser:
                                     break
 
                         if found_act:
-                            if not current_entry['action']:
+                            # Straddle always belongs to NEXT player (UTG), never current (BB)
+                            if found_act.lower() == 'straddle':
+                                pending_action = found_act
+                            elif not current_entry['action']:
                                 current_entry['action'] = found_act
+                            else:
+                                # Current entry already has action → this action belongs to NEXT player
+                                # Buffer it for the next position badge
+                                pending_action = found_act
 
                             # Extract amount if present in same line
                             amt_match = re.search(
                                 r"([+\-]?\d[\d\.,\s]*\d|\d)",
                                 l_clean.replace(matched_variant, "")
                             )
-                            if amt_match and not current_entry['amount']:
-                                current_entry['amount'] = (
-                                    amt_match.group(1).strip() + (" BB" if "bb" in l_clean else "")
-                                )
+                            if amt_match:
+                                amt_val = amt_match.group(1).strip() + (" BB" if "bb" in l_clean else "")
+                                if not current_entry['amount']:
+                                    current_entry['amount'] = amt_val
+                                else:
+                                    pending_amount = amt_val
                         elif is_money:
                             if not current_entry['amount']:
                                 current_entry['amount'] = line
+                            else:
+                                pending_amount = line
 
-                        # Extra: accumulate blinds
-                        if i == 0 and (is_money or "bb" in l_clean):
-                            m = re.search(r"(\d+[\.,]\d+|\d+)", l_clean)
-                            if m:
-                                total_blind_sum += float(m.group(1).replace(',', '.'))
                 elif is_winner:
                     # Winner text found but no current player - skip
                     pass
-                else:
-                    if is_money and i == 0:
-                        m = re.search(r"(\d+[\.,]\d+|\d+)", l_clean)
-                        if m:
-                            total_blind_sum += float(m.group(1).replace(',', '.'))
+                elif is_action or is_money:
+                    # Orphan action/amount: no current entry yet
+                    # Buffer for the next position badge (mobile layout: action ABOVE position)
+                    if is_action:
+                        found_act = ""
+                        ACTION_MAP = {
+                            "cược": ["cược", "cuoc", "cugc"],
+                            "tố": ["tố", "to", "tot", "tốt", "t6"],
+                            "check": ["kiểm tra", "kiem tra", "check"],
+                            "theo": ["theo", "call"],
+                            "bỏ bài": ["bỏ bài", "bo bai", "b6 bai", "fold"],
+                            "all-in": ["all-in", "tất tay", "tố tất", "to tat"],
+                            "ante": ["cược ante", "cuoc ante"],
+                            "straddle": ["str", "straddle"],
+                        }
+                        for std_act, variants in ACTION_MAP.items():
+                            for v in variants:
+                                if v == l_clean or (v in l_clean and len(l_clean) < len(v) + 8):
+                                    found_act = std_act.capitalize()
+                                    break
+                            if found_act:
+                                break
+                        if found_act:
+                            pending_action = found_act
+                    if is_money:
+                        pending_amount = line
 
             # Close last entry
             if current_entry.get('player'):
                 streets_data[street_key].append(current_entry)
 
-            # Card Matching: cards appear BELOW the player name
+            # Blinds_ante: use pot from preflop header if available
+            # (don't sum individual entries — that double-counts)
+
+            # Card Matching: match cards to closest player entry by absolute Y distance
+            # (on WPT Global mobile, cards can appear ABOVE or BELOW the position badge)
             col_entries_with_y = sorted(
                 [e for e in streets_data[street_key] if '_y' in e],
                 key=lambda e: e['_y']
             )
+            # DEBUG: show river entries for card matching
+            if street_key == 'river' and col_entries_with_y:
+                for dbg_e in col_entries_with_y:
+                    logger.debug(f"[DBG RIVER_ENTRY] {dbg_e.get('player','?')} Y={dbg_e.get('_y',0):.0f} act={dbg_e.get('action','')} amt={dbg_e.get('amount','')}")
             for card in found_player_hands:
                 c_col = min(range(5), key=lambda ci: abs(card['x'] - header_centers[ci]))
                 if c_col != i:
@@ -425,17 +536,21 @@ class ActionLogParser:
                 best_entry = None
                 best_dist = 200
                 for entry in col_entries_with_y:
-                    dist = card_y - entry['_y']
-                    if 0 <= dist < best_dist:
+                    dist = abs(card_y - entry['_y'])
+                    if dist < best_dist:
                         best_dist = dist
                         best_entry = entry
                 if best_entry:
                     best_entry['hand'].append(card['name'])
                     if card.get('image') is not None:
                         best_entry.setdefault('card_images', []).append(card['image'])
+                    # DEBUG: card assignment
+                    if street_key == 'river':
+                        logger.debug(f"[DBG CARD] card={card['name']} Y={card_y:.0f} → {best_entry.get('player','')} (entry_Y={best_entry.get('_y',0):.0f}, dist={best_dist:.0f})")
+                elif street_key == 'river':
+                    logger.debug(f"[DBG CARD] card={card['name']} Y={card_y:.0f} → NO MATCH")
 
-            if i == 0:
-                street_pots["blinds_ante"] = f"{total_blind_sum:.2f} BB"
+
 
         # ═══ Phase 4.5: Position Recovery ═══
         # Scan ALL raw OCR boxes for position tags that may have been skipped
@@ -492,43 +607,63 @@ class ActionLogParser:
     def _post_process(self, streets_data):
         """Phase 5: Dedup players, mark winners, infer signs."""
 
-        # 5a. Deduplicate players within each street (merge fields)
+        # 5a. Deduplicate players within each street (merge TRUE duplicates only)
+        # Keep separate entries when a player has different actions (e.g. Check then Call)
         for key in STREET_KEYS:
             entries = streets_data[key]
             if not entries:
                 continue
-            deduped = {}
+            result = []
+            last_by_name = {}  # player_name -> index of last entry in result
             for entry in entries:
                 # Clean name: remove trailing dots or artifacts
                 name = re.sub(r'\.+', '', entry['player']).strip()
                 if not name:
                     continue
+                entry['player'] = name
 
-                if name in deduped:
-                    existing = deduped[name]
-                    # Merge fields
-                    for field in ['pos', 'action', 'amount']:
-                        new_val = entry.get(field, '').strip()
-                        old_val = existing.get(field, '').strip()
-                        if not old_val and new_val:
-                            existing[field] = new_val
-                        elif field == 'amount' and new_val != old_val:
-                            # SMART MERGE: sign + number separately
-                            if (new_val in ['+', '-']) and old_val and not old_val.startswith(new_val):
-                                existing[field] = new_val + old_val
-                            elif (old_val in ['+', '-']) and new_val and not new_val.startswith(old_val):
-                                existing[field] = old_val + new_val
-                            elif is_signed_amount(new_val) and not is_signed_amount(old_val):
+                if name in last_by_name:
+                    existing = result[last_by_name[name]]
+                    existing_act = existing.get('action', '').strip().lower()
+                    new_act = entry.get('action', '').strip().lower()
+
+                    # Both have different non-empty actions → separate entries (check→call, etc.)
+                    if existing_act and new_act and existing_act != new_act:
+                        last_by_name[name] = len(result)
+                        result.append(entry)
+                    else:
+                        # True duplicate or partial data → merge fields
+                        for field in ['pos', 'action', 'amount']:
+                            new_val = entry.get(field, '').strip()
+                            old_val = existing.get(field, '').strip()
+                            if not old_val and new_val:
                                 existing[field] = new_val
+                            elif field == 'amount' and new_val != old_val:
+                                # SMART MERGE: sign + number separately
+                                if (new_val in ['+', '-']) and old_val and not old_val.startswith(new_val):
+                                    existing[field] = new_val + old_val
+                                elif (old_val in ['+', '-']) and new_val and not new_val.startswith(old_val):
+                                    existing[field] = old_val + new_val
+                                elif is_signed_amount(new_val) and not is_signed_amount(old_val):
+                                    existing[field] = new_val
 
-                    if entry.get('hand'):
-                        existing['hand'] = list(set(existing.get('hand', []) + entry['hand']))
+                        if entry.get('hand'):
+                            existing['hand'] = list(set(existing.get('hand', []) + entry['hand']))
                 else:
-                    entry['player'] = name
-                    deduped[name] = entry
-            streets_data[key] = list(deduped.values())
+                    last_by_name[name] = len(result)
+                    result.append(entry)
+            streets_data[key] = result
 
-        # 5b. River: mark +amount entries as WINNER
+        # 5b. Check cleanup: Check action never has an amount
+        # (the amount belongs to the next player's bet/raise, misassigned by OCR ordering)
+        CHECK_KEYWORDS = ['check', 'kiểm tra', 'kiem tra']
+        for key in STREET_KEYS:
+            for entry in streets_data.get(key, []):
+                action_lower = entry.get('action', '').strip().lower()
+                if any(ck in action_lower for ck in CHECK_KEYWORDS) and entry.get('amount'):
+                    entry['amount'] = ''
+
+        # 5c. River: mark +amount entries as WINNER
         for entry in streets_data.get("river", []):
             amt = entry.get('amount', '').strip()
             if amt.startswith('+') and not entry.get('action'):
@@ -542,3 +677,33 @@ class ActionLogParser:
                 if (amt and entry.get('action') != 'WINNER'
                         and not amt.startswith('-') and not amt.startswith('+')):
                     entry['amount'] = '-' + amt
+
+        # 5e. River cleanup: remove players who folded in earlier streets
+        # First: identify folded players
+        folded_players = set()
+        for street_key in ["blinds_ante", "preflop", "flop", "turn"]:
+            for entry in streets_data.get(street_key, []):
+                action_lower = entry.get('action', '').strip().lower()
+                if any(fold_kw in action_lower for fold_kw in ['bỏ bài', 'bo bai', 'fold', 'b6 bai']):
+                    folded_players.add(entry.get('player', ''))
+
+        # Strip ghost hands from folded players (card detector artifacts)
+        # Only WINNERS keep their hands; folded players can't show cards
+        for entry in streets_data.get("river", []):
+            player = entry.get('player', '')
+            if player in folded_players and entry.get('action') != 'WINNER':
+                entry['hand'] = []
+
+        # Protect winners — they stay even if marked as folded (OCR misread)
+        protected_players = set()
+        for entry in streets_data.get("river", []):
+            if entry.get('action') == 'WINNER':
+                protected_players.add(entry.get('player', ''))
+
+        # Remove folded (non-protected) players from river
+        removable = folded_players - protected_players
+        if removable:
+            streets_data['river'] = [
+                e for e in streets_data.get('river', [])
+                if e.get('player', '') not in removable
+            ]

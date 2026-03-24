@@ -42,7 +42,7 @@ def parse_card_string_with_suit(txt, bbox, padded_img):
     return ranks
 
 
-def test_pipeline(img_path="ocrtest.png"):
+def test_pipeline(img_path="ocrtest2.png"):
     if not os.path.exists(img_path):
         print(f"[ERROR] Image not found: {img_path}")
         return
@@ -228,11 +228,17 @@ def test_pipeline(img_path="ocrtest.png"):
                                 rank = card.replace('?', '')  # "9?" → "9", "??" → ""
                                 if rank:
                                     user_input = f"{rank}{user_input}"
-                            corrected.append(user_input)
-                            # Learn template if we have the card image
-                            if i < len(images) and images[i] is not None:
-                                card_detector.learn_card(images[i], user_input, verification_source='user_corrected')
-                                print(f"  [LEARN] Saved template: {user_input}")
+                            # Validate: must be a valid card name (rank+suit)
+                            import re
+                            if not re.match(r'^(?:10|[2-9TJQKA])[hdcs]$', user_input, re.IGNORECASE):
+                                print(f"  [!] Invalid card name '{user_input}'. Must be rank+suit (e.g. Qs, Ah, Td). Skipping.")
+                                corrected.append(card)
+                            else:
+                                corrected.append(user_input)
+                                # Learn template if we have the card image
+                                if i < len(images) and images[i] is not None:
+                                    card_detector.learn_card(images[i], user_input, verification_source='user_corrected', layout_name=layout_name)
+                                    print(f"  [LEARN] Saved template: {user_input}")
                         else:
                             corrected.append(card)
                     except EOFError:
@@ -278,6 +284,6 @@ def test_pipeline(img_path="ocrtest.png"):
 
 
 if __name__ == '__main__':
-    images = sys.argv[1:] if len(sys.argv) > 1 else ["ocrtest.png"]
+    images = sys.argv[1:] if len(sys.argv) > 1 else ["ocrtest2.png"]
     for img_path in images:
         test_pipeline(img_path)

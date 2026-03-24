@@ -81,7 +81,7 @@ export class HandService {
             // --- Inject Player Hands  ---
             if (rawData.player_hands && typeof rawData.player_hands === 'object') {
                 for (const [playerName, cards] of Object.entries(rawData.player_hands)) {
-                    const validCards = (cards as string[]).filter(c => c && !c.includes('?'));
+                    const validCards = (cards as string[]).filter(c => c != null && c !== '');
                     if (validCards.length === 0) continue;
                     if (playersMap.has(playerName)) {
                         const existing = playersMap.get(playerName).hole_cards || [];
