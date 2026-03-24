@@ -201,16 +201,19 @@ model Note {
   note_type       String   @default("TEXT")
   content         String
   category        String   @default("GENERAL") // "EXPLOIT" | "LEAK" | "TELL" | "GENERAL"
-  source          String   @default("custom") // "template" | "custom" | "ai"
+  source          String   @default("custom")  // "template" | "custom" | "ai"
   is_ai_generated Boolean  @default(false)
-  hand_id         String? // Optional link to analyzed hand
+  hand_id         String?  // Optional link to analyzed hand
   created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt          // Track last edit time
 
   user   User   @relation("UserNotes", fields: [user_id], references: [id], onDelete: Cascade)
-  player Player @relation(fields: [player_id], references: [id])
+  player Player @relation(fields: [player_id], references: [id], onDelete: Cascade)
   hand   Hand?  @relation(fields: [hand_id], references: [id])
 
   @@index([user_id])
+  @@index([player_id])
+  @@index([user_id, created_at]) // Fast: "get my recent notes"
 }
 
 model Hand {

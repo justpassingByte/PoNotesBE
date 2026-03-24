@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
+import { prisma } from '../lib/prisma';
 
 export class AuthController {
     /**
@@ -118,12 +119,63 @@ export class AuthController {
 
     /**
      * GET /api/auth/me
+     * Returns enriched user profile: plan details, subscription, recent notes
      */
     async me(req: Request, res: Response) {
-        // Authenticated user from middleware
         const user = (req as any).user;
         if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-        res.json({ success: true, user });
+        try {
+            // Fetch plan details from PricingPlan (real data, not hardcoded)
+            const plan = await (prisma as any).pricingPlan.findUnique({
+                where: { id: user.premium_tier }
+            });
+
+            // Fetch user's 5 most recent notes with player info
+            const recentNotes = await prisma.note.findMany({
+                where: { user_id: user.id },
+                orderBy: { created_at: 'desc' },
+                take: 5,
+                select: {
+                    id: true,
+                    content: true,
+                    street: true,
+                    note_type: true,
+                    category: true,
+                    source: true,
+                    is_ai_generated: true,
+                    created_at: true,
+                    player: {
+                        select: { id: true, name: true, playstyle: true }
+                    }
+                }
+            });
+
+            // Aggregate counts
+            const totalNotes = await prisma.note.count({ where: { user_id: user.id } });
+            const totalPlayers = await prisma.player.count({ where: { user_id: user.id } });
+
+            res.json({
+                success: true,
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    premium_tier: user.premium_tier,
+                    subscription_expiry: user.subscription_expiry ?? null,
+                    created_at: user.created_at,
+                    is_admin: user.is_admin ?? false,
+                },
+                plan: plan ?? null,
+                stats: {
+                    totalNotes,
+                    totalPlayers,
+                },
+                recentNotes,
+            });
+        } catch (err: any) {
+            console.error('[AuthController] /me error:', err.message);
+            // Fallback: return minimal profile
+            res.json({ success: true, user, plan: null, stats: null, recentNotes: [] });
+        }
     }
 }
