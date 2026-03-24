@@ -4,8 +4,44 @@ import { ProfileAggregator } from '../services/analysis/ProfileAggregator';
 import { playerCache, clearPlayerCache, clearDashboardCache } from '../lib/cache';
 import { UsageService } from '../services/usageService';
 import { UsageActionType } from '@prisma/client';
+import { PlayerService } from '../services/playerService';
+import { PlayerRepository } from '../repositories/PlayerRepository';
 
 export class PlayerController {
+    private playerService = new PlayerService(new PlayerRepository());
+
+    /**
+     * Create a single player
+     */
+    async create(req: Request, res: Response) {
+        try {
+            const userId = (req as any).user.id;
+            const player = await this.playerService.createPlayer(userId, req.body);
+            clearPlayerCache(userId);
+            clearDashboardCache(userId);
+            res.status(201).json({ success: true, data: player });
+        } catch (error: any) {
+            console.error('[PlayerController] Create Error:', error);
+            res.status(400).json({ success: false, error: error.message || 'Failed to create player' });
+        }
+    }
+
+    /**
+     * Update a player
+     */
+    async update(req: Request, res: Response) {
+        try {
+            const userId = (req as any).user.id;
+            const id = req.params.id as string;
+            const player = await this.playerService.updatePlayer(userId, id, req.body);
+            clearPlayerCache(userId);
+            clearDashboardCache(userId);
+            res.json({ success: true, data: player });
+        } catch (error: any) {
+            console.error('[PlayerController] Update Error:', error);
+            res.status(400).json({ success: false, error: error.message || 'Failed to update player' });
+        }
+    }
     /**
      * List players with cursor-based pagination and search
      */

@@ -17,6 +17,12 @@ router.post(
     asyncErrorWrapper((req, res) => controller.bulkCreate(req, res))
 );
 
+// Single Create
+router.post(
+    '/',
+    asyncErrorWrapper((req, res) => controller.create(req, res))
+);
+
 // Export all data (Must come before :id route)
 router.get(
     '/export',
@@ -39,6 +45,12 @@ router.get(
 router.delete(
     '/:id',
     asyncErrorWrapper((req, res) => controller.delete(req, res))
+);
+
+// Update player
+router.put(
+    '/:id',
+    asyncErrorWrapper((req, res) => controller.update(req, res))
 );
 
 // Trigger re-analysis/aggregation (quota-gated by controller logic)
