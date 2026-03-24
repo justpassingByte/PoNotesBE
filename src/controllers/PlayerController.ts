@@ -118,6 +118,7 @@ export class PlayerController {
 
             res.json({ success: true, data: player });
         } catch (error) {
+            console.error('[PlayerController] GetById Error:', error);
             res.status(500).json({ success: false, error: 'Error fetching player' });
         }
     }
