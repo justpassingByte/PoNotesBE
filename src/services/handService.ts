@@ -125,10 +125,14 @@ export class HandService {
                     const rawPlayer = act.player;
                     const playerName = typeof rawPlayer === 'string' ? rawPlayer.trim() : (rawPlayer?.name || String(rawPlayer || 'Unknown'));
 
-                    console.log(`[HandService] Action Mapped [${streetName}]: Player=${playerName}, Act=${standardAction}, Amt=${act.amount}`);
+                    // Resolve position from positionsMap OR from the action itself
+                    const position = act.position || positionsMap[playerName] || playersMap.get(playerName)?.position || undefined;
+
+                    console.log(`[HandService] Action Mapped [${streetName}]: Player=${playerName}, Pos=${position}, Act=${standardAction}, Amt=${act.amount}`);
 
                     return {
                         player: playerName,
+                        position,
                         action: standardAction,
                         amount: parseAmount(act.amount),
                     };

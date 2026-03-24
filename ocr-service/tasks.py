@@ -206,12 +206,24 @@ def process_hand(image_hex: str, image_hash: str):
 
         logger.info(f"[tasks] Decision: {outcome['decision']} | Final conf: {outcome['final']:.3f}")
 
-        # 7. Self-Learning — only for AUTO ACCEPT (high confidence)
-        if outcome['decision'] == DECISION_AUTO_ACCEPT and board_img is not None:
+        # 7. Self-Learning — learn from high-confidence OCR detections
+        # Runs on both AUTO_ACCEPT and FORCE_CORRECT (if conf is high enough)
+        if board_img is not None:
             for item in card_info:
                 name = item['name']
-                if item.get('is_new') and item['confidence'] >= 0.95:
-                    card_detector.learn_card(item['image'], name, verification_source='high_confidence')
+                if not name or name == '??':
+                    continue
+
+                if item.get('is_new'):
+                    # OCR-detected card: save as new template if confidence >= 0.75
+                    # (PaddleOCR text conf rarely exceeds 0.95, so 0.95 was too strict)
+                    if item['confidence'] >= 0.75:
+                        logger.info(f"[LEARN] New card '{name}' via OCR (conf={item['confidence']:.2f}) — saving template.")
+                        card_detector.learn_card(item['image'], name, verification_source='high_confidence', layout_name=layout_name)
+                else:
+                    # Template-matched card: reinforce to reset decay clock on last_used
+                    if item['confidence'] >= 0.92 and outcome['decision'] == DECISION_AUTO_ACCEPT:
+                        card_detector.learn_card(item['image'], name, verification_source='high_confidence', layout_name=layout_name)
 
         # 8. Pot OCR
         raw_pot_text = ""

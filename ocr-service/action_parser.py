@@ -28,8 +28,30 @@ STREET_KEYS = ["blinds_ante", "preflop", "flop", "turn", "river"]
 
 POS_TAGS = [
     "sb", "bb", "btn", "utg", "utg+1", "utg+2",
-    "hj", "co", "str", "ante", "mp", "mp1", "bb+", "str+1"
+    "hj", "co", "str", "ante", "mp", "mp1", "bb+", "str+1",
+    # Common OCR misreads:
+    "utg-1", "utg-2", "utg 1", "utg 2",  # '+' read as '-' or space
+    "hi", "h]", "hj.",                     # 'HJ' misreads
+    "c0", "c)",                             # 'CO' misreads
+    "bt", "bt n", "btn.",                   # 'BTN' misreads
+    "lj", "loj",                            # LJ (LoJack) variants
+    "ep", "mp2", "mp3",                     # Extra position labels
 ]
+
+# Canonical position map: normalize OCR reads to standard labels
+_POS_NORMALIZE = {
+    "utg-1": "UTG+1", "utg 1": "UTG+1",
+    "utg-2": "UTG+2", "utg 2": "UTG+2",
+    "hi": "HJ", "h]": "HJ", "hj.": "HJ",
+    "c0": "CO", "c)": "CO",
+    "bt": "BTN", "bt n": "BTN", "btn.": "BTN",
+    "lj": "LJ", "loj": "LJ",
+}
+
+def normalize_pos(text: str) -> str:
+    """Canonicalize OCR-read position text to standard abbreviation."""
+    low = text.strip().lower()
+    return _POS_NORMALIZE.get(low, text.strip().upper())
 
 ACTIONS_LIST = [
     "kiểm tra",                     #Check
@@ -323,7 +345,7 @@ class ActionLogParser:
                 elif current_entry.get('player'):
                     # Assign to current player
                     if is_pos and not current_entry['pos']:
-                        current_entry['pos'] = line.upper()
+                        current_entry['pos'] = normalize_pos(line)
                     elif is_winner:
                         current_entry['action'] = "WINNER"
                     elif is_action or is_money:
@@ -423,9 +445,18 @@ class ActionLogParser:
             text = box[1][0].strip().lower()
             x_c = sum([p[0] for p in box[0]]) / 4.0
             y_c = sum([p[1] for p in box[0]]) / 4.0
+            # Exact match OR starts-with match (handles 'utg+1', 'utg+2' OCR variants)
+            matched_pos = None
             if text in POS_TAGS:
+                matched_pos = text.upper()
+            else:
+                for tag in POS_TAGS:
+                    if (text.startswith(tag) or tag.startswith(text)) and len(text) >= 2:
+                        matched_pos = text.upper()
+                        break
+            if matched_pos:
                 col_idx = min(range(5), key=lambda ci: abs(x_c - header_centers[ci]))
-                pos_boxes.append({"pos": text.upper(), "y": y_c, "col": col_idx})
+                pos_boxes.append({"pos": normalize_pos(matched_pos), "y": y_c, "col": col_idx, "x": x_c})
 
         logger.debug(f"[ActionParser] Phase 4.5 Position Recovery found: {pos_boxes}")
 
@@ -435,7 +466,7 @@ class ActionLogParser:
             street_key = STREET_KEYS[col]
             entries = streets_data.get(street_key, [])
             best_entry = None
-            best_dist = 50  # Max Y distance for matching (px)
+            best_dist = 100  # Increased: 50px → 100px to handle more layout variants
             for entry in entries:
                 if entry.get('pos'):
                     continue  # Already has position
@@ -446,7 +477,7 @@ class ActionLogParser:
                     best_dist = dist
                     best_entry = entry
             if best_entry:
-                best_entry['pos'] = pos_box['pos']
+                best_entry['pos'] = pos_box['pos']  # already normalized at collection time
 
         # Clean up internal _y field
         for key in STREET_KEYS:
