@@ -104,6 +104,22 @@ async def list_templates():
         
     return {"status": "ok", "templates": cards + anchors}
 
+from fastapi.responses import FileResponse
+
+@app.get("/templates/{template_type}/{filename}")
+async def get_template_image(template_type: str, filename: str):
+    """Serve a specific template image file."""
+    if template_type not in ["cards", "anchors"]:
+        raise HTTPException(status_code=400, detail="Invalid template type")
+    
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(os.path.dirname(__file__), "templates", template_type, safe_filename)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Template not found")
+        
+    return FileResponse(file_path)
+
 @app.delete("/templates/{template_type}/{filename}")
 async def delete_template(template_type: str, filename: str):
     """Delete a specific template file."""

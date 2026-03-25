@@ -129,4 +129,30 @@ router.delete(
     })
 );
 
+/**
+ * GET /api/ocr/templates/:type/:filename
+ * Proxies the template image from the OCR service.
+ */
+router.get(
+    '/templates/:type/:filename',
+    asyncErrorWrapper(async (req: Request, res: Response) => {
+        const { type, filename } = req.params;
+        const normalizedType = type === 'card' ? 'cards' : type === 'anchor' ? 'anchors' : type;
+        
+        try {
+            const response = await axios.get(`${OCR_SERVICE_URL}/templates/${normalizedType}/${filename}`, {
+                responseType: 'stream'
+            });
+            res.setHeader('Content-Type', response.headers['content-type'] || 'image/png');
+            return response.data.pipe(res);
+        } catch (err: any) {
+            console.error(`[OCR_SERVICE] Failed to fetch template image ${filename}:`, err.message);
+            return res.status(err.response?.status || 502).json({ 
+                success: false, 
+                error: 'Failed to fetch template image from Vision Engine.' 
+            });
+        }
+    })
+);
+
 export const ocrRoutes = router;

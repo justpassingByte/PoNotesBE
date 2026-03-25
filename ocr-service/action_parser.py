@@ -264,24 +264,18 @@ class ActionLogParser:
                         if edge_ratio < 0.03:
                             logger.info(f"[ActionParser] Card {idx}: SKIPPED (smooth icon/avatar, edge_ratio={edge_ratio:.4f})")
                             continue
+                        # Filter: reject colorful avatars — real cards are mostly white/gray (low saturation)
+                        # Avatar photos have rich colors across the entire image
+                        hsv_card = _cv2.cvtColor(c['image'], _cv2.COLOR_BGR2HSV)
+                        sat_mean = float(hsv_card[:, :, 1].mean())
+                        if sat_mean > 80:
+                            logger.info(f"[ActionParser] Card {idx}: SKIPPED (colorful avatar, sat_mean={sat_mean:.1f})")
+                            continue
                     
 
-                    # Interactive: ask user to correct ?? or low-confidence river cards
+                    # (Interactive correction removed to prevent blocking Celery worker)
                     if c['name'] == '??' or c['confidence'] < 0.70:
-                        try:
-                            user_input = input(f"  [?] River card {idx} is '{c['name']}'. Correct name (e.g. Qs) or Enter to skip: ").strip()
-                            if user_input:
-                                # Validate: must be a valid card name (rank+suit, e.g. Ah, Ks, Td)
-                                if not re.match(r'^(?:10|[2-9TJQKA])[hdcs]$', user_input, re.IGNORECASE):
-                                    logger.debug(f"Invalid card name '{user_input}'. Must be rank+suit (e.g. Qs, Ah, Td). Skipping.")
-                                else:
-                                    c['name'] = user_input
-                                    c['confidence'] = 1.0
-                                    if c.get('image') is not None:
-                                        card_detector.learn_card(c['image'], user_input, verification_source='user_corrected', layout_name=layout_name)
-                                        logger.info(f"[LEARN] User taught river card: {user_input}")
-                        except EOFError:
-                            pass
+                        logger.debug(f"[ActionParser] River card {idx} has low confidence ({c['confidence']:.2f}) or is unknown: {c['name']}")
                     
                     found_player_hands.append({
                         "x": c['center'][0] + river_x1,
@@ -649,6 +643,8 @@ class ActionLogParser:
 
                         if entry.get('hand'):
                             existing['hand'] = list(set(existing.get('hand', []) + entry['hand']))
+                        if entry.get('card_images'):
+                            existing.setdefault('card_images', []).extend(entry['card_images'])
                 else:
                     last_by_name[name] = len(result)
                     result.append(entry)

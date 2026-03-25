@@ -420,29 +420,45 @@ def apply_feedback(
         regions = layout['regions']
         layout_name = layout.get('name')
         
-        # We focus on board cards for learning for now
-        if 'board_cards' not in regions:
-             return {"status": "error", "error": "No board_cards region in layout"}
-             
-        board_img = layout_engine.crop_region(img, regions['board_cards'])
-        fb_res = card_detector.detect_cards_with_info(board_img, ocr_engine=ocr)
-        fb_card_info = fb_res.get('cards', []) if isinstance(fb_res, dict) else []
+        # We gather cards from both board and action log to support all corrections
+        fb_card_info = []
         
-        # Find the slot that corresponds to the card_name (the one the user is confirming or replacing)
+        if 'board_cards' in regions:
+            board_img = layout_engine.crop_region(img, regions['board_cards'])
+            fb_res = card_detector.detect_cards_with_info(board_img, ocr_engine=ocr)
+            fb_card_info.extend(fb_res.get('cards', []) if isinstance(fb_res, dict) else [])
+            
+        if 'action_log' in regions:
+            action_img = layout_engine.crop_region(img, regions['action_log'])
+            # Only right half of action log usually contains the small player cards
+            ah, aw = action_img.shape[:2]
+            river_x1 = int(aw * 0.50)
+            action_col = action_img[:, river_x1:aw]
+            fb_res_col = card_detector.detect_cards_with_info(action_col, ocr_engine=ocr)
+            fb_card_info.extend(fb_res_col.get('cards', []) if isinstance(fb_res_col, dict) else [])
+            
+        if not fb_card_info:
+             return {"status": "error", "error": "No regions found to extract cards for feedback"}
+        
+        # Find the slot that corresponds to the card_name
         target_roi = None
-        if card_index is not None and card_index < len(fb_card_info):
-            target_roi = fb_card_info[card_index]['image']
-        else:
-            for item in fb_card_info:
-                if item['name'] == card_name:
-                    target_roi = item['image']
-                    break
+        target_item = None
+        
+        # Try finding by name first (most reliable since frontend index might clash between hole/board)
+        for item in fb_card_info:
+            if item['name'] == card_name:
+                target_item = item
+                target_roi = item['image']
+                break
+                
+        # Fallback to index if name not found (e.g., if it was '??')
+        if target_roi is None and card_index is not None and card_index < len(fb_card_info):
+             target_item = fb_card_info[card_index]
+             target_roi = target_item['image']
         
         if target_roi is None and action != "reject":
-            # If we can't find the exact card, try finding any card if it's the only one?
-            # Or just fail safely.
-            logger.warning(f"[feedback] Could not find ROI for '{card_name}' in image. Learning whole region as fallback.")
-            target_roi = board_img # Better than the whole screenshot, but still slightly risky.
+            logger.warning(f"[feedback] Could not find ROI for '{card_name}'. Learning whole board_cards region as fallback.")
+            target_roi = board_img if 'board_img' in locals() else img
 
         if action == "confirm":
             if card_name == "all_board":
@@ -458,15 +474,14 @@ def apply_feedback(
 
         elif action == "edit" and corrected_name:
             # Phase 3: Penalize the wrong template if we had one
-            if card_index is not None and card_index < len(fb_card_info):
-                bad_item = fb_card_info[card_index]
-                bad_filename = bad_item.get('matched_filename')
+            if target_item:
+                bad_filename = target_item.get('matched_filename')
                 if bad_filename:
                     card_detector.report_error(bad_filename)
                 
                 # Learn the new one
-                card_detector.learn_card(bad_item['image'], corrected_name, verification_source='user_corrected', layout_name=layout_name)
-                logger.info(f"[feedback] User CORRECTED index {card_index} to '{corrected_name}'.")
+                card_detector.learn_card(target_item['image'], corrected_name, verification_source='user_corrected', layout_name=layout_name)
+                logger.info(f"[feedback] User CORRECTED '{card_name}' to '{corrected_name}'.")
             return {"status": "ok", "action": action, "card": corrected_name}
 
         else:  # reject — or edit without correction

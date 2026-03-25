@@ -239,6 +239,9 @@ def test_pipeline(img_path="ocrtest2.png"):
                                 if i < len(images) and images[i] is not None:
                                     card_detector.learn_card(images[i], user_input, verification_source='user_corrected', layout_name=layout_name)
                                     print(f"  [LEARN] Saved template: {user_input}")
+                                else:
+                                    print(f"  [!] No card image available for '{user_input}' (images={len(images)}, idx={i}). Template NOT saved.")
+                                    print(f"       To teach this card, correct it during the River card detection step above.")
                         else:
                             corrected.append(card)
                     except EOFError:
