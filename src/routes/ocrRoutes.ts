@@ -92,19 +92,39 @@ router.post(
 );
 
 /**
- * GET /api/ocr/status/:imageHash
- * 
- * Check if a previously processed image has a cached result.
+ * GET /api/ocr/templates
+ * Fetches the list of all saved card and anchor templates from the OCR service.
  */
 router.get(
-    '/status/:imageHash',
+    '/templates',
     asyncErrorWrapper(async (req: Request, res: Response) => {
-        const { imageHash } = req.params;
         try {
-            const response = await axios.get(`${OCR_SERVICE_URL}/status/${imageHash}`);
-            return res.json(response.data);
+            const response = await axios.get(`${OCR_SERVICE_URL}/templates`);
+            return res.json({ success: true, data: response.data.templates });
         } catch (err: any) {
-            return res.status(404).json({ status: 'not_found' });
+            console.error(`[OCR_SERVICE] Failed to fetch templates:`, err.message);
+            return res.status(502).json({ success: false, error: 'Failed to fetch OCR templates from Vision Engine.' });
+        }
+    })
+);
+
+/**
+ * DELETE /api/ocr/templates/:type/:filename
+ * Deletes a specific template file from the OCR service.
+ */
+router.delete(
+    '/templates/:type/:filename',
+    asyncErrorWrapper(async (req: Request, res: Response) => {
+        const { type, filename } = req.params;
+        try {
+            const response = await axios.delete(`${OCR_SERVICE_URL}/templates/${type}/${filename}`);
+            return res.json({ success: true, message: response.data.message });
+        } catch (err: any) {
+            console.error(`[OCR_SERVICE] Failed to delete template ${filename}:`, err.message);
+            return res.status(err.response?.status || 502).json({ 
+                success: false, 
+                error: err.response?.data?.detail || 'Failed to delete template from Vision Engine.' 
+            });
         }
     })
 );

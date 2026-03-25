@@ -1,7 +1,5 @@
 import os
 import hashlib
-import redis
-import json
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from celery_worker import celery_app
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,9 +16,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Cache DB (Redis /1)
-redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
-cache = redis.from_url(redis_url)
 
 
 # ─── Pydantic Models ─────────────────────────────────────────────────────────
@@ -92,7 +87,40 @@ async def submit_feedback(req: FeedbackRequest):
     )
     return {"status": "queued", "job_id": job.id, "action": req.action}
 
+@app.get("/templates")
+async def list_templates():
+    """List all saved card and anchor templates."""
+    templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+    cards_dir = os.path.join(templates_dir, "cards")
+    anchors_dir = os.path.join(templates_dir, "anchors")
+    
+    cards = []
+    if os.path.exists(cards_dir):
+        cards = [{"name": f, "type": "card"} for f in os.listdir(cards_dir) if f.endswith(".png")]
+        
+    anchors = []
+    if os.path.exists(anchors_dir):
+        anchors = [{"name": f, "type": "anchor"} for f in os.listdir(anchors_dir) if f.endswith(".png")]
+        
+    return {"status": "ok", "templates": cards + anchors}
 
-if __name__ == "__main__":
+@app.delete("/templates/{template_type}/{filename}")
+async def delete_template(template_type: str, filename: str):
+    """Delete a specific template file."""
+    if template_type not in ["cards", "anchors"]:
+        raise HTTPException(status_code=400, detail="Invalid template type")
+        
+    # Prevent directory traversal
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(os.path.dirname(__file__), "templates", template_type, safe_filename)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Template not found")
+        
+    try:
+        os.remove(file_path)
+        return {"status": "ok", "message": f"Deleted {safe_filename}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -20,30 +20,19 @@ export class HandService {
         inputType: 'text' | 'image';
         tier: PremiumTier;
     }): Promise<{ hand: any; fromCache: boolean }> {
-        const hashInput = `${params.userId}:${params.rawInput}`;
+        // Always generate unique hash per upload — OCR self-learning means
+        // re-processing the same image should yield improved results over time.
+        const hashInput = `${params.userId}:${params.rawInput}:${Date.now()}`;
         const hash = params.inputType === 'text'
             ? generateHandHash(hashInput)
             : crypto.createHash('sha256').update(hashInput).digest('hex');
 
-        // Check for existing hand to log repeat processing
-        const existingHand = await prisma.hand.findUnique({ where: { hand_hash: hash } });
-
-        if (existingHand) {
-            await LoggerService.log(
-                params.userId,
-                LogType.SYSTEM,
-                `Hand re-upload detected (hash match). Clearing previous analysis for re-learning.`,
-                { hash: hash.slice(0, 16) },
-                existingHand.id
-            );
-        } else {
-            await LoggerService.log(
-                params.userId,
-                LogType.SYSTEM,
-                `New hand uploaded. Initializing OCR neural pipeline.`,
-                { hash: hash.slice(0, 16) }
-            );
-        }
+        await LoggerService.log(
+            params.userId,
+            LogType.SYSTEM,
+            `New hand uploaded. Initializing OCR neural pipeline.`,
+            { hash: hash.slice(0, 16) }
+        );
 
         let parsedData: ParsedHand | null = null;
         if (params.inputType === 'image') {
@@ -168,15 +157,9 @@ export class HandService {
             parsedData = this.parseTextHand(params.rawInput);
         }
 
-        // UPSERT HAND (Avoid Duplicates & Support Re-learning)
-        const hand = await prisma.hand.upsert({
-            where: { hand_hash: hash },
-            update: {
-                parsed_data: parsedData as any,
-                ai_analysis: null as any,
-                created_at: new Date()
-            },
-            create: {
+        // Always create new hand record (unique hash per upload)
+        const hand = await prisma.hand.create({
+            data: {
                 user_id: params.userId,
                 hand_hash: hash,
                 raw_input: params.rawInput,

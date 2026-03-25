@@ -2,7 +2,6 @@ import os
 import time
 import cv2
 import numpy as np
-import redis
 import json
 import logging
 from celery_worker import celery_app
@@ -17,9 +16,6 @@ from typing import Optional
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Cache DB (Redis /1)
-redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
-cache = redis.from_url(redis_url)
 
 # Initialize Engine Singletons
 ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)  # ch = Chinese + English + Numbers
@@ -376,8 +372,6 @@ def process_hand(image_hex: str, image_hash: str):
             }
         }
 
-        # OCR Output Caching Disabled (Self-learning engine requirement)
-        # cache.set(f"hash:{image_hash}", json.dumps(final_result), ex=3600*24)
         return final_result
 
     except Exception as e:
