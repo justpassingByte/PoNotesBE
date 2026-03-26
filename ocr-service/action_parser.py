@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ─────────────────────────────────────────────
 
-STREET_KEYS = ["blinds_ante", "preflop", "flop", "turn", "river"]
+STREET_KEYS = ["blinds_ante", "preflop", "flop", "turn", "river", "showdown"]
 
 POS_TAGS = [
     "sb", "bb", "btn", "utg", "utg+1", "utg+2",
@@ -53,33 +53,86 @@ def normalize_pos(text: str) -> str:
     low = text.strip().lower()
     return _POS_NORMALIZE.get(low, text.strip().upper())
 
-ACTIONS_LIST = [
-    "kiểm tra", "kiem tra",         # Check (with/without diacritics)
-    "cược", "cuoc", "cugc",        # BET (Vietnamese + OCR typos)
-    "tố", "to", "tốt", "tot", "t6", # RAISE (OCR might read "Tố" as "Tốt" or "T6")
-    "theo",                         # CALL
-    "bỏ bài", "bo bai", "b6 bai",  # FOLD
-    "check", "fold", "call", "raise", "all-in",
-    "tất tay", "tố tất", "to tat", # ALL-IN variants
-    "cược ante", "cuoc ante",       # Ante posting action
-    "str", "straddle",              # Straddle (forced bet, NOT a position)
+# Currency markers recognized across BB, USD, and CNY formats
+# Includes common OCR misreads in various encodings (Windows/Docker)
+CURRENCY_MARKERS = [
+    "bb", "$", "¥", "￥", "元", 
+    "∩┐Ñ", "∩┐ñ", "┬Ñ", "┬ñ", "Γö╝", "√ê", "√Ñ", "∩┐╝"
 ]
+
+def has_currency_marker(text_lower):
+    """Check if text contains any known currency marker."""
+    return any(c in text_lower for c in CURRENCY_MARKERS)
+
+def is_money_text(text_lower):
+    """Check if text is likely just a money value (digits + currency)."""
+    # Remove markers and whitespace
+    clean = text_lower
+    for c in CURRENCY_MARKERS:
+        clean = clean.replace(c, "")
+    clean = clean.strip()
+    # If it's pure digits/dots/commas, it's money
+    return bool(re.match(r'^[\d\s\.,]+$', clean)) and clean != ""
+
+_ACTION_NORMALIZE = {
+    "kiểm tra": "Check", "kiem tra": "Check",
+    "cược": "Bet", "cuoc": "Bet", "cugc": "Bet",
+    "tố": "Raise", "to": "Raise", "tốt": "Raise", "tot": "Raise", "t6": "Raise",
+    "theo": "Call",
+    "bỏ bài": "Fold", "bo bai": "Fold", "b6 bài": "Fold",
+    "check": "Check", "fold": "Fold", "call": "Call", "raise": "Raise", "all-in": "All-In",
+    "tất tay": "All-In", "tố tất": "All-In", "to tat": "All-In",
+    "str": "Straddle", "straddle": "Straddle", "strade": "Straddle",
+}
+
+def normalize_action(text: str) -> str:
+    """Normalize action text to standard English labels."""
+    low = text.strip().lower()
+    # Use word boundaries for English keywords
+    for kw, norm in _ACTION_NORMALIZE.items():
+        if kw == low:
+            return norm
+        # For multi-word or common fragments, be careful
+        if len(kw) > 3 and kw in low:
+            return norm
+        # Stricter check for Vietnamese 'tố' or 'to'
+        if kw in ['tố', 'to'] and low == kw:
+            return norm
+    return text.strip().capitalize()
+
+def is_signed_amount(text: str) -> bool:
+    """Check if text is a signed amount like '+￥74' or '-$31'."""
+    low = text.strip().lower()
+    # Check for +/- followed by optional marker and digits
+    pattern = r'^[+-][^0-9]?\s*[\d\.,]+'
+    return bool(re.match(pattern, low)) or (('+' in low or '-' in low) and has_currency_marker(low))
+
+ACTIONS_LIST = list(_ACTION_NORMALIZE.keys()) + [
+    "cược ante", "cuoc ante", "str", "straddle"
+]
+
+def is_action_text(text_lower):
+    """Stricter check if text is a poker action."""
+    for act in ACTIONS_LIST:
+        if act == text_lower:
+            return True
+        # Allow fragments only for longer specific keywords
+        if len(act) > 3 and act in text_lower and len(text_lower) < len(act) + 4:
+            return True
+    return False
 
 WINNER_KEYWORDS = ["winner", "thắng", "win", "won"]
 
 # Text that should never be treated as a player name
 NOISE_KEYWORDS = [
-    "winner", "pot", "total",
-    "pre-flop", "flop", "turn", "river",
-    "bảo hiểm", "bao hiem",        # Insurance — not a player
-    "tố tất", "to tat",            # All-in badge text
-    "jp",                           # Jackpot label
+    "winner", "pot", "total", "tổng", "tong",
+    "pre-flop", "flop", "turn", "river", "trước flop", "truoc flop",
+    "bảo hiểm", "bao hiem", "tố tất", "to tat", "jp", "盲注", "翻牌前",
 ]
 
 
 # ─────────────────────────────────────────────
 # Utility Functions
-# ─────────────────────────────────────────────
 
 
 def greedy_pot(s):
@@ -90,44 +143,35 @@ def greedy_pot(s):
     return m.group(1).strip() if m else "0"
 
 
-# Currency markers recognized across BB, USD, and CNY formats
-CURRENCY_MARKERS = ["bb", "$", "¥", "元"]
 
-def has_currency_marker(text_lower):
-    """Check if text contains any known currency marker (BB, $, ¥, 元)."""
-    return any(c in text_lower for c in CURRENCY_MARKERS)
+def parse_bb_value(text: str) -> float:
+    """
+    Extract numeric value from text like '+¥693', '-¥4', '22,395', '1.947 BB'.
+    Handles commas/dots as thousands separators.
+    """
+    if not text:
+        return 0.0
+        
+    # Standardize: keep digits, dots, commas, 'k', and negative sign
+    clean = re.sub(r'[^-\d\.,k]', '', text.lower())
+    if not clean:
+        return 0.0
 
-def is_money_text(text_lower):
-    """Check if text is money/amount (BB, $, ¥, +, -, %). Exclude percentage-only values."""
-    # Pure percentage (e.g. "5%", "99%") is NOT a bet amount
-    if re.match(r'^\d+%$', text_lower.strip()):
-        return False
-    return (has_currency_marker(text_lower) or any(c in text_lower for c in ["+", "-"])) and text_lower not in POS_TAGS
-
-
-def is_signed_amount(text_lower):
-    """Check if text starts with + or - (gain/loss indicator)"""
-    return bool(re.match(r'^[+\-]', text_lower.strip()))
-
-
-def parse_bb_value(text):
-    """Extract numeric value from text like '1.947 BB', '+1,128 BB', '$ 65,90', '$3.40', '¥100'.
-    Handles BB, USD ($), and CNY (¥/元) formats.
-    Handles European-style thousands separators (1.947 = 1947, not 1.947)."""
-    clean = text.strip().lower()
-    for marker in ["bb", "$", "¥", "元", "+", "-"]:
-        clean = clean.replace(marker, "")
-    clean = clean.strip()
-    clean = re.sub(r'\s+', '', clean)
-    # Detect thousands separator: X.XXX or X,XXX pattern (exactly 3 digits after separator)
-    if re.match(r'^\d{1,3}[.,]\d{3}$', clean):
+    # Pattern X,XXX or X.XXX (exactly 3 digits after separator) is likely thousands
+    if re.match(r'^-?\d+[.,]\d{3}$', clean):
         clean = clean.replace('.', '').replace(',', '')
     else:
         clean = clean.replace(',', '.')
+
     try:
+        if 'k' in clean:
+            return float(clean.replace('k', '')) * 1000.0
         return float(clean)
-    except ValueError:
+    except:
         return 0.0
+
+def parse_currency(text: str) -> float:
+    return parse_bb_value(text)
 
 
 def format_bb(val):
@@ -183,14 +227,23 @@ class ActionLogParser:
 
         if not ocr_results or not ocr_results[0]:
             logger.warning("[ActionParser] No OCR results for action log.")
-            return {"streets": streets_data, "street_pots": street_pots}
+            return {"streets": streets_data, "street_pots": street_pots, "winner": {"player": None, "amount": None}}
 
         h_act, w_act = action_img.shape[:2]
         boxes = ocr_results[0]
 
         # ═══ Phase 1: Header Detection ═══
         header_centers = [(idx + 0.5) * (w_act / 5.0) for idx in range(5)]
-        header_keywords = ["blind", "pre-flop", "flop", "turn", "river"]
+        
+        # Header keywords with multi-language support (English, Vietnamese, Chinese)
+        header_keywords = [
+            ["blind", "mù", "ante", "盲注", "前注"], # Blinds
+            ["pre-flop", "trước flop", "truoc flop", "前牌"], # Pre-flop
+            ["flop", "翻牌"],
+            ["turn", "转牌"],
+            ["river", "河牌"]
+        ]
+        
         found_headers = [False] * 5
         header_y_values = []
 
@@ -198,10 +251,13 @@ class ActionLogParser:
             text = box[1][0].lower().strip()
             x_c = sum([p[0] for p in box[0]]) / 4.0
             y_c = sum([p[1] for p in box[0]]) / 4.0
-            for idx, kw in enumerate(header_keywords):
-                if kw in text and not found_headers[idx]:
-                    if "pre" in text and kw == "flop":
+            
+            for idx, kws in enumerate(header_keywords):
+                if not found_headers[idx] and any(kw in text for kw in kws):
+                    # Guard against "pre-flop" matching "flop"
+                    if idx == 2 and ("pre" in text or "trước" in text or "truoc" in text):
                         continue
+                        
                     header_centers[idx] = x_c
                     found_headers[idx] = True
                     header_y_values.append(y_c)
@@ -228,54 +284,31 @@ class ActionLogParser:
         if card_detector is not None:
             try:
                 import cv2 as _cv2
-                river_x1 = max(0, int(header_centers[4] - col_width * 0.6))
-                # Right edge: whichever is smaller — sidebar boundary or column edge
+                # Cắt thật sát cột "Hand" (cột số 4) để tránh lấn sân sang cột "Amount" hoặc "Action"
+                # Cột Hand bắt đầu từ tâm lùi lại khoảng 0.3 là an toàn và tránh được chữ "WINNER" / số tiền
+                river_x1 = max(0, int(header_centers[4] - col_width * 0.3))
                 right_limit = sidebar_x if sidebar_x is not None else w_act
                 river_x2 = min(int(right_limit), int(header_centers[4] + col_width * 0.5))
                 river_col_img = action_img[:, river_x1:river_x2]
 
 
 
-                log_cards = card_detector.detect_cards_with_info(river_col_img, ocr_engine=ocr_engine, min_group_size=1)
+                log_cards = card_detector.detect_cards_with_info(river_col_img, ocr_engine=ocr_engine, min_group_size=1, context="river")
                 for idx, c in enumerate(log_cards.get('cards', [])):
                     rect = c.get('rect', [0,0,0,0])
                     cw, ch = rect[2], rect[3]
                     logger.info(f"[ActionParser] Card {idx}: name={c['name']} conf={c['confidence']:.2f} rect={rect} (w={cw}x{ch}px) center={c['center']}")
                     
-                    # Filter: reject too-small elements (icons, badges) — real cards ≥ 25px wide
-                    if cw < 25 or ch < 35:
-                        logger.info(f"[ActionParser] Card {idx}: SKIPPED (too small {cw}x{ch}px)")
+                    # Symbol-based detection: cards are rank+suit symbol pairs, not full card rects
+                    # Skip cards with very low confidence (noise from action text)
+                    if c['confidence'] < 0.35:
+                        logger.info(f"[ActionParser] Card {idx}: SKIPPED (low confidence {c['confidence']:.2f})")
                         continue
-                    # Filter: reject near-square elements (avatars) — cards aspect ~0.67
-                    aspect = cw / max(ch, 1)
-                    if aspect > 0.85 or aspect < 0.45:
-                        logger.info(f"[ActionParser] Card {idx}: SKIPPED (bad aspect {aspect:.2f})")
-                        continue
-                    # Filter: reject FOLD cards (face-down, dark gray card backs)
-                    if c.get('image') is not None:
-                        gray_card = _cv2.cvtColor(c['image'], _cv2.COLOR_BGR2GRAY) if len(c['image'].shape) == 3 else c['image']
-                        mean_val = float(gray_card.mean())
-                        if mean_val < 120:
-                            logger.info(f"[ActionParser] Card {idx}: SKIPPED (Dark FOLD card, mean={mean_val:.1f})")
-                            continue
-                        # Filter: reject smooth icons/avatars — real cards have sharp text edges
-                        edges = _cv2.Canny(gray_card, 50, 150)
-                        edge_ratio = float(edges.sum() / 255) / max(edges.size, 1)
-                        if edge_ratio < 0.03:
-                            logger.info(f"[ActionParser] Card {idx}: SKIPPED (smooth icon/avatar, edge_ratio={edge_ratio:.4f})")
-                            continue
-                        # Filter: reject colorful avatars — real cards are mostly white/gray (low saturation)
-                        # Avatar photos have rich colors across the entire image
-                        hsv_card = _cv2.cvtColor(c['image'], _cv2.COLOR_BGR2HSV)
-                        sat_mean = float(hsv_card[:, :, 1].mean())
-                        if sat_mean > 80:
-                            logger.info(f"[ActionParser] Card {idx}: SKIPPED (colorful avatar, sat_mean={sat_mean:.1f})")
-                            continue
                     
-
-                    # (Interactive correction removed to prevent blocking Celery worker)
-                    if c['name'] == '??' or c['confidence'] < 0.70:
-                        logger.debug(f"[ActionParser] River card {idx} has low confidence ({c['confidence']:.2f}) or is unknown: {c['name']}")
+                    # Skip unknown cards with no valid rank
+                    if c['name'] == '??':
+                        logger.debug(f"[ActionParser] River card {idx}: SKIPPED (unknown)")
+                        continue
                     
                     found_player_hands.append({
                         "x": c['center'][0] + river_x1,
@@ -317,6 +350,7 @@ class ActionLogParser:
         # ═══ Phase 4: Sequential Merge (Vertical Stack) ═══
         player_counter = 0  # Auto-name counter for mobile (no player names, only positions)
         pos_to_player = {}  # Cross-street dedup: same position = same player
+        all_card_rects = [] # Collect all card rects for debug dumping
         for i, bucket in enumerate(buckets):
             bucket.sort(key=lambda b: b['y'])
             street_key = STREET_KEYS[i]
@@ -342,21 +376,28 @@ class ActionLogParser:
                     if not has_bb_amount:
                         continue
 
-                # Pot detection: first $amount in any col, before any player
-                if has_currency_marker(l_clean) and not current_entry and not pot_found and len(l_clean) < 20:
-                    if re.search(r'\d', l_clean):
-                        street_pots[street_key] = line
-                        pot_found = True
-                        continue
-
                 # Content type identification
                 is_pos = (l_clean in POS_TAGS)
-                is_action = any(
-                    act == l_clean or (act in l_clean and len(l_clean) < len(act) + 8)
-                    for act in ACTIONS_LIST
-                )
+                is_action = is_action_text(l_clean)
                 is_money = (is_money_text(l_clean) or is_signed_amount(l_clean)) and not is_pos
                 is_winner = any(wk in l_clean for wk in WINNER_KEYWORDS)
+
+                # Pot / Ante detection: robust check for lines starting with non-alphanumeric currency/metadata
+                # This catches ￥14, ∩┐Ñ105, etc. even with encoding issues.
+                # Regex meaning: starts with a non-word char (like ￥, $, ∩) OR contains currency marker
+                is_money_prefix = bool(re.match(r'^[^\w\s\(\.]', l_clean)) or has_currency_marker(l_clean)
+                has_digits = bool(re.search(r'\d', l_clean))
+                
+                # If it's a "money-like" line and we haven't found a player yet, it's a Pot
+                if (is_money_prefix and has_digits and not is_signed_amount(l_clean)) and not current_entry and not pot_found:
+                    # Special case: ignore if it's a known position tag (though rare to have money in pos)
+                    if not is_pos:
+                        street_pots[street_key] = line
+                        pot_found = True
+                        # Pot lines often contain the first action (e.g. "￥14 Raise")
+                        if any(act in l_clean for act in ["raise", "call", "fold", "check", "bet", "tố", "theo", "bỏ"]):
+                            pending_action = normalize_action(line)
+                        continue
 
                 # DEBUG: Show raw OCR ordering for key columns
                 if i <= 1 or i == 4:  # blinds_ante, preflop, and river buckets
@@ -374,17 +415,25 @@ class ActionLogParser:
                     if (current_entry.get('pos') == norm_pos
                             and abs(current_entry.get('_y', 0) - item['y']) < 50):
                         continue  # Skip duplicate position badge
-                    if current_entry.get('player'):
-                        streets_data[street_key].append(current_entry)
-                    # Cross-street dedup: same position = same player
-                    if norm_pos not in pos_to_player:
-                        player_counter += 1
-                        pos_to_player[norm_pos] = f"Player{player_counter}"
-                    current_entry = {
-                        "player": pos_to_player[norm_pos], "pos": norm_pos,
-                        "action": "", "amount": "", "hand": [],
-                        "_y": item['y']
-                    }
+                    
+                    # If we ALREADY have a player name from a previous line in this bucket, keep it!
+                    # Otherwise, use mapping/PlayerX fallback
+                    if not current_entry.get('player'):
+                        if norm_pos not in pos_to_player:
+                            player_counter += 1
+                            pos_to_player[norm_pos] = f"Player{player_counter}"
+                        
+                        current_entry = {
+                            "player": pos_to_player[norm_pos], "pos": norm_pos,
+                            "action": "", "amount": "", "hand": [],
+                            "_y": item['y']
+                        }
+                    else:
+                        # Existing player from actual name line - just attach position
+                        current_entry['pos'] = norm_pos
+                        if not current_entry.get('_y'):
+                             current_entry['_y'] = item['y']
+                    
                     # If there's a pending action from a previous orphan line, assign it now
                     if pending_action:
                         current_entry['action'] = pending_action
@@ -394,13 +443,16 @@ class ActionLogParser:
                         pending_amount = ""
                     continue
 
-                # Player name: not pos/action/money/winner, length >= 3, not noise
+                # Player name: not pos/action/money/winner, length >= 2 (Chinese names), not noise
+                # WPT PC: Names are usually 2+ chars. If it starts with money symbol and is short, it's noise.
                 is_likely_player = (
                     not is_pos and not is_action and not is_money and not is_winner
-                    and len(l_clean) >= 3
+                    and len(l_clean) >= 2
+                    and not (is_money_prefix and len(l_clean) < 6)
                     and not re.match(r'^\d{1,3}%?$', l_clean)
                     and l_clean not in NOISE_KEYWORDS
                     and not l_clean.startswith('jp')
+                    and not is_header
                 )
                 if is_likely_player:
                     # New player name detected
@@ -416,64 +468,36 @@ class ActionLogParser:
                         current_entry['pos'] = normalize_pos(line)
                     elif is_winner:
                         current_entry['action'] = "WINNER"
-                    elif is_action or is_money:
-                        # Action + Amount splitting
-                        found_act = ""
-                        # List of standard mapped actions
-                        ACTION_MAP = {
-                            "cược": ["cược", "cuoc", "cugc"],
-                            "tố": ["tố", "to", "tot", "tốt", "t6"],
-                            "check": ["kiểm tra", "kiem tra", "check"],
-                            "theo": ["theo", "call"],
-                            "bỏ bài": ["bỏ bài", "bo bai", "b6 bai", "fold"],
-                            "all-in": ["all-in", "tất tay", "tố tất", "to tat"],
-                            "ante": ["cược ante", "cuoc ante"],
-                            "straddle": ["str", "straddle"],
-                        }
-                        
-                        for std_act, variants in ACTION_MAP.items():
-                            for v in variants:
-                                if v == l_clean or (v in l_clean and len(l_clean) < len(v) + 8):
-                                    found_act = std_act.capitalize()
-                                    matched_variant = v
-                                    break
-                            if found_act:
-                                break
-                        
-                        if not found_act:
-                            for act in ACTIONS_LIST:
-                                if act in l_clean:
-                                    found_act = act.capitalize()
-                                    matched_variant = act
-                                    break
+                    elif is_action:
+                        norm_act = normalize_action(line)
+                        # On PC, Straddle belongs to the current entry if possible
+                        if not current_entry['action']:
+                            current_entry['action'] = norm_act
+                        else:
+                            pending_action = norm_act
 
-                        if found_act:
-                            # Straddle always belongs to NEXT player (UTG), never current (BB)
-                            if found_act.lower() == 'straddle':
-                                pending_action = found_act
-                            elif not current_entry['action']:
-                                current_entry['action'] = found_act
-                            else:
-                                # Current entry already has action → this action belongs to NEXT player
-                                # Buffer it for the next position badge
-                                pending_action = found_act
-
-                            # Extract amount if present in same line
-                            amt_match = re.search(
-                                r"([+\-]?\d[\d\.,\s]*\d|\d)",
-                                l_clean.replace(matched_variant, "")
-                            )
-                            if amt_match:
-                                amt_val = amt_match.group(1).strip() + (" BB" if "bb" in l_clean else "")
-                                if not current_entry['amount']:
-                                    current_entry['amount'] = amt_val
-                                else:
-                                    pending_amount = amt_val
-                        elif is_money:
+                        # Use a more liberal regex for amount after action name
+                        # Strip common action keywords AND their substrings to isolate amount
+                        clean_for_amt = l_clean
+                        for kw in ["straddle", "str", "raise", "call", "bet", "tố", "tá", "theo", "check", "fold"]:
+                            clean_for_amt = clean_for_amt.replace(kw, "")
+                        
+                        print(f"[DBG AMT] l_clean='{l_clean}' action='{norm_act}' clean_for_amt='{clean_for_amt}'")
+                        
+                        # Match first sequence of digits
+                        amt_match = re.search(r"(\d[\d\.,\s]*\d|\d)", clean_for_amt)
+                        if amt_match:
+                            val = amt_match.group(1).strip().replace(" ", "")
+                            amt_val = val + (" BB" if "bb" in l_clean else "")
                             if not current_entry['amount']:
-                                current_entry['amount'] = line
+                                current_entry['amount'] = amt_val
                             else:
-                                pending_amount = line
+                                pending_amount = amt_val
+                    elif is_money:
+                        if not current_entry['amount']:
+                            current_entry['amount'] = line
+                        else:
+                            pending_amount = line
 
                 elif is_winner:
                     # Winner text found but no current player - skip
@@ -482,26 +506,8 @@ class ActionLogParser:
                     # Orphan action/amount: no current entry yet
                     # Buffer for the next position badge (mobile layout: action ABOVE position)
                     if is_action:
-                        found_act = ""
-                        ACTION_MAP = {
-                            "cược": ["cược", "cuoc", "cugc"],
-                            "tố": ["tố", "to", "tot", "tốt", "t6"],
-                            "check": ["kiểm tra", "kiem tra", "check"],
-                            "theo": ["theo", "call"],
-                            "bỏ bài": ["bỏ bài", "bo bai", "b6 bai", "fold"],
-                            "all-in": ["all-in", "tất tay", "tố tất", "to tat"],
-                            "ante": ["cược ante", "cuoc ante"],
-                            "straddle": ["str", "straddle"],
-                        }
-                        for std_act, variants in ACTION_MAP.items():
-                            for v in variants:
-                                if v == l_clean or (v in l_clean and len(l_clean) < len(v) + 8):
-                                    found_act = std_act.capitalize()
-                                    break
-                            if found_act:
-                                break
-                        if found_act:
-                            pending_action = found_act
+                        norm_act = normalize_action(line)
+                        pending_action = norm_act
                     if is_money:
                         pending_amount = line
 
@@ -512,38 +518,91 @@ class ActionLogParser:
             # Blinds_ante: use pot from preflop header if available
             # (don't sum individual entries — that double-counts)
 
-            # Card Matching: match cards to closest player entry by absolute Y distance
-            # (on WPT Global mobile, cards can appear ABOVE or BELOW the position badge)
-            col_entries_with_y = sorted(
-                [e for e in streets_data[street_key] if '_y' in e],
-                key=lambda e: e['_y']
-            )
-            # DEBUG: show river entries for card matching
-            if street_key == 'river' and col_entries_with_y:
-                for dbg_e in col_entries_with_y:
-                    logger.debug(f"[DBG RIVER_ENTRY] {dbg_e.get('player','?')} Y={dbg_e.get('_y',0):.0f} act={dbg_e.get('action','')} amt={dbg_e.get('amount','')}")
-            for card in found_player_hands:
-                c_col = min(range(5), key=lambda ci: abs(card['x'] - header_centers[ci]))
-                if c_col != i:
-                    continue
-                card_y = card['y']
-                best_entry = None
-                best_dist = 200
-                for entry in col_entries_with_y:
-                    dist = abs(card_y - entry['_y'])
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_entry = entry
-                if best_entry:
-                    best_entry['hand'].append(card['name'])
-                    if card.get('image') is not None:
-                        best_entry.setdefault('card_images', []).append(card['image'])
-                    # DEBUG: card assignment
-                    if street_key == 'river':
-                        logger.debug(f"[DBG CARD] card={card['name']} Y={card_y:.0f} → {best_entry.get('player','')} (entry_Y={best_entry.get('_y',0):.0f}, dist={best_dist:.0f})")
-                elif street_key == 'river':
-                    logger.debug(f"[DBG CARD] card={card['name']} Y={card_y:.0f} → NO MATCH")
+            # Skip the separate showdown split logic - keep everything in river
+            if street_key == 'river':
+                # Build showdown_players: players with WINNER/LOSER or no gameplay action
+                gameplay_actions = {'check', 'bet', 'raise', 'call', 'fold', 'all-in', 'straddle'}
+                showdown_players = set()
+                for e in streets_data[street_key]:
+                    pname = e.get('player', '')
+                    act = e.get('action', '').strip().lower()
+                    if pname and (not act or act in ('winner', 'loser') or act not in gameplay_actions):
+                        showdown_players.add(pname)
 
+                # Split: action entries (have action like Check) → stay in river
+                # Result entries (no action) for SHOWDOWN players → showdown
+                action_entries = []
+                showdown_entries = []
+                for e in streets_data[street_key]:
+                    pname = e.get('player', '')
+                    if e.get('action', '') and e.get('action', '').strip().lower() in gameplay_actions:
+                        action_entries.append(e)  # Check, Bet, etc. → river
+                    elif pname in showdown_players:
+                        showdown_entries.append(e)  # WINNER/LOSER only → showdown
+                
+                # ONLY split if river has actual action entries.
+                # If river has NO actions (e.g., all-in runout), keep everything in river
+                # and match cards to river entries directly.
+                if action_entries:
+                    streets_data[street_key] = action_entries
+                    streets_data['showdown'] = showdown_entries
+                    card_match_entries = showdown_entries
+                    card_match_players = showdown_players
+                    print(f"  [Showdown] Split: {len(action_entries)} action + {len(showdown_entries)} showdown")
+                else:
+                    # No actions in river → don't split, keep all in river
+                    # All entries are result-only, match cards to them
+                    card_match_entries = streets_data[street_key]
+                    card_match_players = {e.get('player', '') for e in card_match_entries if e.get('player', '')}
+                    print(f"  [Showdown] No river actions → keeping {len(card_match_entries)} entries in river")
+                
+                # Card Matching: for entries that have results (showdown or river)
+                entries_with_y = sorted(
+                    [e for e in card_match_entries 
+                     if '_y' in e and e.get('player', '') in card_match_players],
+                    key=lambda e: e['_y']
+                )
+                
+                if entries_with_y:
+                    print(f"  [Card Match] Entries for card matching (filtered):")
+                    for dbg_e in entries_with_y:
+                        print(f"    {dbg_e.get('player','?')} Y={dbg_e.get('_y',0):.0f}")
+                
+                # Sort cards by Y, then X (left card first in pair)
+                river_cards = sorted(
+                    [c for c in found_player_hands 
+                     if min(range(5), key=lambda ci: abs(c['x'] - header_centers[ci])) == i],
+                    key=lambda c: (c['y'], c['x'])
+                )
+                
+                print(f"  [Card Match] {len(river_cards)} card rects in river column")
+                for card in river_cards:
+                    card_y = card['y']
+                    best_entry = None
+                    best_dist = 150  # Real card pairs are ~50px from player entry
+                    candidates = sorted(entries_with_y, key=lambda e: abs(card_y - e['_y']))
+                    for entry in candidates:
+                        dist = abs(card_y - entry['_y'])
+                        if dist < 150 and len(entry.get('hand', [])) < 2:
+                            best_entry = entry
+                            best_dist = dist
+                            break
+                    if best_entry:
+                        best_entry['hand'].append(card['name'])
+                        if card.get('image') is not None:
+                            best_entry.setdefault('card_images', []).append(card['image'])
+                        print(f"    [Card Match] card={card['name']} Y={card_y:.0f} → {best_entry.get('player','')} (entry_Y={best_entry.get('_y',0):.0f}, dist={best_dist:.0f})")
+                    else:
+                        print(f"    [Card Match] card={card['name']} Y={card_y:.0f} → SKIP (no entry nearby)")
+
+                # Store ALL card rects for debug dumping
+                all_card_rects = []
+                for card in river_cards:
+                    all_card_rects.append({
+                        'name': card.get('name', '??'),
+                        'y': card.get('y', 0),
+                        'image': card.get('image'),
+                    })
 
 
         # ═══ Phase 4.5: Position Recovery ═══
@@ -596,7 +655,45 @@ class ActionLogParser:
         # ═══ Phase 5: Post-Processing ═══
         self._post_process(streets_data)
 
-        return {"streets": streets_data, "street_pots": street_pots}
+        # ═══ Phase 5.5: Winner Extraction & Summary ═══
+        winner_info = {"player": None, "amount": None}
+        for street_key in STREET_KEYS:
+            for entry in streets_data[street_key]:
+                if entry.get('action') == 'WINNER' or any(wk in str(entry.get('player','')).lower() for wk in WINNER_KEYWORDS):
+                    winner_info["player"] = entry['player']
+                    winner_info["amount"] = entry.get('amount')
+                    break
+        
+        # If no winner found in entries, scan all buckets for a standalone Winner line
+        if not winner_info["player"]:
+            for bucket in buckets:
+                for item in bucket:
+                    line = item['text']
+                    l_clean = line.lower()
+                    if any(wk in l_clean for wk in WINNER_KEYWORDS):
+                        # Extract amount from the same line if present
+                        amt_match = re.search(r"(\d[\d\.,\s]*\d|\d)", l_clean)
+                        winner_info["amount"] = amt_match.group(1).strip() if amt_match else None
+                        
+                        # Try to find a player name in the same line by removing winner/amount
+                        clean_name = line
+                        for wk in WINNER_KEYWORDS:
+                            pattern = re.compile(re.escape(wk), re.IGNORECASE)
+                            clean_name = pattern.sub("", clean_name)
+                        if winner_info["amount"]:
+                            clean_name = clean_name.replace(winner_info["amount"], "")
+                        
+                        clean_name = clean_name.strip(":, \t\n\r")
+                        if len(clean_name) >= 2 and clean_name.lower() not in NOISE_KEYWORDS:
+                            winner_info["player"] = clean_name
+                        break
+
+        return {
+            "streets": streets_data,
+            "street_pots": street_pots,
+            "winner": winner_info,
+            "all_card_rects": all_card_rects if 'all_card_rects' in dir() else []
+        }
 
     def _post_process(self, streets_data):
         """Phase 5: Dedup players, mark winners, infer signs."""
@@ -618,8 +715,22 @@ class ActionLogParser:
 
                 if name in last_by_name:
                     existing = result[last_by_name[name]]
+                    # Vietnamese / Thai / Chinese mappings
+                    action_map = {
+                        "tố": "Raise",
+                        "theo": "Call",
+                        "bỏ bài": "Fold"
+                    }
                     existing_act = existing.get('action', '').strip().lower()
+                    for vi, en in action_map.items():
+                        if vi in existing_act:
+                            existing_act = en.lower()
+                            break
                     new_act = entry.get('action', '').strip().lower()
+                    for vi, en in action_map.items():
+                        if vi in new_act:
+                            new_act = en.lower()
+                            break
 
                     # Both have different non-empty actions → separate entries (check→call, etc.)
                     if existing_act and new_act and existing_act != new_act:
@@ -642,7 +753,7 @@ class ActionLogParser:
                                     existing[field] = new_val
 
                         if entry.get('hand'):
-                            existing['hand'] = list(set(existing.get('hand', []) + entry['hand']))
+                            existing['hand'] = list(set(existing.get('hand', []) + entry['hand']))[:2]
                         if entry.get('card_images'):
                             existing.setdefault('card_images', []).extend(entry['card_images'])
                 else:
@@ -656,25 +767,31 @@ class ActionLogParser:
         for key in STREET_KEYS:
             for entry in streets_data.get(key, []):
                 action_lower = entry.get('action', '').strip().lower()
-                if any(ck in action_lower for ck in CHECK_KEYWORDS) and entry.get('amount'):
+                amt = entry.get('amount', '').strip()
+                # Only clear unsigned amounts from Check entries (those are misassigned bet sizes)
+                # Preserve signed amounts (+/-) — those are win/loss results, not bets
+                if any(ck in action_lower for ck in CHECK_KEYWORDS) and amt and not amt.startswith('+') and not amt.startswith('-'):
                     entry['amount'] = ''
 
-        # 5c. River: mark +amount entries as WINNER
+        # 5c. River: mark +amount as WINNER, -amount as LOSER
         for entry in streets_data.get("river", []):
             amt = entry.get('amount', '').strip()
-            if amt.startswith('+') and not entry.get('action'):
+            if amt.startswith('+'):
                 entry['action'] = "WINNER"
+            elif amt.startswith('-'):
+                entry['action'] = "LOSER"
 
         # 5c. Poker logic: non-winners with unsigned amounts in River must be losses (-)
         has_winner = any(e.get('action') == 'WINNER' for e in streets_data.get("river", []))
         if has_winner:
             for entry in streets_data.get("river", []):
                 amt = entry.get('amount', '').strip()
-                if (amt and entry.get('action') != 'WINNER'
+                if (amt and entry.get('action') not in ('WINNER', 'LOSER')
                         and not amt.startswith('-') and not amt.startswith('+')):
                     entry['amount'] = '-' + amt
+                    entry['action'] = "LOSER"
 
-        # 5e. River cleanup: remove players who folded in earlier streets
+        # 5e. River/Showdown cleanup: remove players who folded in earlier streets
         # First: identify folded players
         folded_players = set()
         for street_key in ["blinds_ante", "preflop", "flop", "turn"]:
@@ -685,21 +802,24 @@ class ActionLogParser:
 
         # Strip ghost hands from folded players (card detector artifacts)
         # Only WINNERS keep their hands; folded players can't show cards
-        for entry in streets_data.get("river", []):
-            player = entry.get('player', '')
-            if player in folded_players and entry.get('action') != 'WINNER':
-                entry['hand'] = []
+        for sk in ["river", "showdown"]:
+            for entry in streets_data.get(sk, []):
+                player = entry.get('player', '')
+                if player in folded_players and entry.get('action') != 'WINNER':
+                    entry['hand'] = []
 
         # Protect winners — they stay even if marked as folded (OCR misread)
         protected_players = set()
-        for entry in streets_data.get("river", []):
-            if entry.get('action') == 'WINNER':
-                protected_players.add(entry.get('player', ''))
+        for sk in ["river", "showdown"]:
+            for entry in streets_data.get(sk, []):
+                if entry.get('action') == 'WINNER':
+                    protected_players.add(entry.get('player', ''))
 
-        # Remove folded (non-protected) players from river
+        # Remove folded (non-protected) players from river and showdown
         removable = folded_players - protected_players
         if removable:
-            streets_data['river'] = [
-                e for e in streets_data.get('river', [])
-                if e.get('player', '') not in removable
-            ]
+            for sk in ["river", "showdown"]:
+                streets_data[sk] = [
+                    e for e in streets_data.get(sk, [])
+                    if e.get('player', '') not in removable
+                ]

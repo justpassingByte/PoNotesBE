@@ -41,6 +41,30 @@ export class HandService {
             console.log('\n--- [HandService] RAW OCR DATA RECEIVED ---');
             console.log(JSON.stringify(rawData, null, 2).slice(0, 1500) + '... (truncated)');
 
+            // Normalize card names: OCR outputs "Aheart" but frontend expects "Ah"
+            const normalizeCard = (c: string): string => {
+                if (!c || c === '??') return c;
+                return c
+                    .replace(/heart$/i, 'h')
+                    .replace(/diamond$/i, 'd')
+                    .replace(/club$/i, 'c')
+                    .replace(/spade$/i, 's');
+            };
+
+            // Normalize board cards
+            if (Array.isArray(rawData.board)) {
+                rawData.board = rawData.board.map(normalizeCard);
+            }
+
+            // Normalize player_hands cards
+            if (rawData.player_hands && typeof rawData.player_hands === 'object') {
+                for (const [name, cards] of Object.entries(rawData.player_hands)) {
+                    if (Array.isArray(cards)) {
+                        rawData.player_hands[name] = (cards as string[]).map(normalizeCard);
+                    }
+                }
+            }
+
             const playersMap = new Map<string, any>();
             const positionsMap = rawData.positions || {};
 

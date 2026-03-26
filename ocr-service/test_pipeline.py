@@ -3,290 +3,441 @@ test_pipeline.py — End-to-end test for the merged OCR pipeline.
 Tests action_parser + engine (CardDetector) without Celery/Redis.
 """
 
-# ── Suppress ALL noisy logs BEFORE imports ──
+# ── Suppress only system/3rd party noisy logs ──
 import os
 os.environ["PPOCR_LOG_LEVEL"] = "ERROR"
 import warnings
 warnings.filterwarnings("ignore")
 import logging
-logging.disable(logging.WARNING)  # Kill ALL warning/info globally
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.ERROR)
+# Only disable logs for specific modules if needed, but keep our DEBUG ones
+for m in ["paddle", "onnxruntime"]:
+    logging.getLogger(m).setLevel(logging.ERROR)
 
 import sys
+import io
 import cv2
 import numpy as np
 import json
+import re
+
+# Force UTF-8 encoding for console output to correctly display Chinese names on Windows
+if sys.platform == 'win32':
+    import codecs
+    # Try to set codepage 65001 (UTF-8) programmatically
+    try:
+        os.system('chcp 65001 > nul')
+        # On modern Python, reconfigure is better
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
+            sys.stderr.reconfigure(encoding='utf-8')
+    except:
+        pass
+    # Fallback to codecs wrapper if reconfigure failed or not enough
+    if not hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'replace')
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'replace')
+elif hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+# Configure basic logging for our output
+logging.basicConfig(level=logging.DEBUG, format='%(message)s')
+logger = logging.getLogger("test_pipeline")
+
 from paddleocr import PaddleOCR
-from engine import LayoutEngine, CardDetector, get_suit_from_color
+from engine import LayoutEngine, CardDetector
 from action_parser import ActionLogParser, greedy_pot, parse_bb_value, format_bb, STREET_KEYS
 
 
-def parse_card_string_with_suit(txt, bbox, padded_img):
-    """Parse OCR text into card rank+suit (same as tasks.py)."""
-    ranks = []
-    if 'BB' in txt or len(txt) > 3 or '.' in txt or ',' in txt:
-        return ranks
-    x1 = int(min(pt[0] for pt in bbox))
-    y1 = int(min(pt[1] for pt in bbox))
-    x2 = int(max(pt[0] for pt in bbox))
-    y2 = int(max(pt[1] for pt in bbox))
-    roi = padded_img[y1:y2, x1:x2]
-    if txt == '10':
-        return ['10' + get_suit_from_color(roi)]
-    char_w = (x2 - x1) // max(1, len(txt))
-    for i, char in enumerate(txt):
-        if char in ['A','K','Q','J','T','9','8','7','6','5','4','3','2']:
-            c_roi = roi[:, i*char_w:(i+1)*char_w] if char_w > 0 else roi
-            ranks.append(char + get_suit_from_color(c_roi))
-    return ranks
-
-
-def test_pipeline(img_path="ocrtest2.png"):
+def test_pipeline(img_path="ocrtestMain.png"):
     if not os.path.exists(img_path):
         print(f"[ERROR] Image not found: {img_path}")
         return
 
-    print(f"\n{'='*60}")
+    print("=" * 60)
     print(f"  OCR Pipeline Test: {img_path}")
-    print(f"{'='*60}")
-
-    # 1. Initialize
-    ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)  # ch = Chinese + English + Numbers
-    layout_engine = LayoutEngine(config_path="layout_config.json")
-    card_detector = CardDetector(templates_dir="templates/cards", enable_learning=True)
-    action_parser = ActionLogParser()
+    print("=" * 60)
 
     img = cv2.imread(img_path)
     if img is None:
-        print(f"[ERROR] Failed to read image: {img_path}")
+        print(f"[ERROR] Could not load image: {img_path}")
         return
-
     h, w = img.shape[:2]
     print(f"  Image size: {w}x{h}")
 
-    # 2. Layout Detection
-    match = layout_engine.match_layout(img, ocr_engine=ocr)
-    if not match:
-        print("[FAIL] No layout matched!")
+    # 1. Detection
+    ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)
+    engine = LayoutEngine()
+    best_match = engine.match_layout(img, ocr_engine=ocr)
+    if not best_match:
+        print("[ERROR] No layout matched!")
         return
-
-    layout, score = match
-    layout_name = layout['name']
-    regions = layout['regions']
+    
+    layout, score = best_match
+    layout_name = layout.get('name', 'Unknown')
     print(f"\n[✓] Layout: {layout_name} (score={score:.3f})")
 
-    # 3. Board Card Detection
-    print(f"\n{'─'*40}")
-    print("  BOARD CARDS")
-    print(f"{'─'*40}")
-    board_cards = []
-    if 'board_cards' in regions:
-        board_img = layout_engine.crop_region(img, regions['board_cards'])
-        cv2.imwrite("debug_crop_board.png", board_img)
-        bh, bw = board_img.shape[:2]
-        print(f"  Crop size: {bw}x{bh}")
+    # 2. Board Cards (template-only, no OCR for cards)
+    detector = CardDetector()
+    board_region = layout['regions'].get('board_cards')
+    board_crop = engine.crop_region(img, board_region) if board_region else None
+    
+    # Save the base board crop for layout debugging
+    if board_crop is not None:
+        cv2.imwrite("debug_crops/layout_board_crop.png", board_crop)
+        print(f"  → Dumped layout crop: debug_crops/layout_board_crop.png")
+    
+    # Derive platform tag: site + name (e.g. "wpt_global" + "PC" → "WPT_PC")
+    site_prefix = layout.get('site', '').replace('_global', '').replace('_', '').upper()  # "WPT"
+    variant = layout_name.replace(' ', '_') if layout_name else 'UNKNOWN'
+    platform_tag = f"{site_prefix}_{variant}" if site_prefix else variant  # "WPT_PC"
+    
+    board_data = detector.detect_cards_with_info(
+        board_crop, context="board"
+    ) if board_crop is not None else {"cards": []}
+    
+    # Smart gap-based padding: use X positions to detect missing cards
+    detected_cards = board_data['cards']
+    if detected_cards:
+        # Sort by X position (left to right)
+        sorted_cards = sorted(detected_cards, key=lambda c: c['rect'][0])
+        
+        # Calculate gaps between consecutive cards
+        board_cards_ordered = []
+        if len(sorted_cards) < 5 and len(sorted_cards) >= 2:
+            # Find the average card width + gap
+            widths = [c['rect'][2] for c in sorted_cards]
+            avg_w = sum(widths) / len(widths)
+            
+            # Check for large gaps (>1.5x expected card width+gap)
+            for i, card in enumerate(sorted_cards):
+                if i > 0:
+                    prev_end = sorted_cards[i-1]['rect'][0] + sorted_cards[i-1]['rect'][2]
+                    curr_start = card['rect'][0]
+                    gap = curr_start - prev_end
+                    # If gap is larger than expected (>1.3x avg card width), insert ??
+                    if gap > avg_w * 1.3:
+                        board_cards_ordered.append('??')
+                board_cards_ordered.append(card['name'])
+        else:
+            board_cards_ordered = [c['name'] for c in sorted_cards]
+        
+        # Pad remaining to 5 cards at the end
+        while len(board_cards_ordered) < 5:
+            board_cards_ordered.append('??')
+        board_cards = board_cards_ordered[:5]
+    else:
+        board_cards = ['??'] * 5
+    
+    print("\n" + "─" * 40)
+    print("  BOARD CARDS (Template-Only)")
+    print("─" * 40)
+    if board_crop is not None:
+        print(f"  Crop size: {board_crop.shape[1]}x{board_crop.shape[0]}")
+    raw_names = [c['name'] for c in detected_cards]
+    print(f"  Detected: {raw_names}")
+    print(f"  Board:    {board_cards}")
+    
+    # Debug dump: save each board card crop for visual verification
+    unknown_indices = [i for i, c in enumerate(board_cards) if c == '??']
+    if unknown_indices and detected_cards:
+        sorted_by_x = sorted(detected_cards, key=lambda c: c['rect'][0])
+        print(f"\n  ⚠ {len(unknown_indices)} unknown card(s) — saving debug crops...")
+        for i, card_data in enumerate(sorted_by_x):
+            if card_data.get('image') is not None:
+                debug_path = f"debug_board_card_{i}.png"
+                cv2.imwrite(debug_path, card_data['image'])
+                print(f"    → Saved {debug_path} (rect={card_data['rect']})")
+        print(f"  Check debug_board_card_*.png files to verify crops are correct.")
+        
+        print(f"\n  Board (final): {board_cards}")
 
-        res = card_detector.detect_cards_with_info(board_img, ocr_engine=ocr)
-        card_info = res.get('cards', []) if isinstance(res, dict) else res
-
-        if card_info:
-            for i, c in enumerate(card_info):
-                src = "TEMPLATE" if not c.get('is_new') else "OCR"
-                print(f"  → {c['name']} (conf={c['confidence']:.2f}, src={src})")
-                # Self-learning: save high-confidence OCR cards as templates
-                if c.get('is_new') and c['confidence'] >= 0.85 and c['name'] != '??':
-                    print(f"  [LEARN] Saving template for: {c['name']}")
-                    card_detector.learn_card(c['image'], c['name'], verification_source='high_confidence', layout_name=layout_name)
-                # Interactive: ask user to correct ?? or low-confidence cards
-                elif c['name'] == '??' or c['confidence'] < 0.70:
-                    user_input = input(f"  [?] Card {i} is '{c['name']}'. Correct name (e.g. 9h) or Enter to skip: ").strip()
-                    if user_input:
-                        c['name'] = user_input
-                        c['confidence'] = 1.0
-                        card_detector.learn_card(c['image'], user_input, verification_source='user_corrected', layout_name=layout_name)
-                        print(f"  [LEARN] User taught: {user_input}")
-            board_cards = [c['name'] for c in card_info]
-
-    # Pad board to always 5 cards
-    board_cards = [c for c in board_cards if c != '??'][:5]
-    while len(board_cards) < 5:
-        board_cards.append('??')
-    print(f"  Board: {board_cards}")
-
-
-    # 5. Pot OCR
-    print(f"\n{'─'*40}")
+    # 3. Pot Area
+    pot_region = layout['regions'].get('pot_area')
+    pot_crop = engine.crop_region(img, pot_region) if pot_region else None
+    pot_text = ""
+    if pot_crop is not None:
+        ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)
+        res = ocr.ocr(pot_crop, cls=False)
+        if res and res[0]:
+            pot_text = " ".join([line[1][0] for line in res[0]])
+    
+    pot_val = greedy_pot(pot_text) if pot_text else 0
+    print("\n" + "─" * 40)
     print("  POT")
-    print(f"{'─'*40}")
-    raw_pot = ""
-    if 'pot_area' in regions:
-        pot_img = layout_engine.crop_region(img, regions['pot_area'])
-        cv2.imwrite("debug_crop_pot.png", pot_img)
-        pot_res = ocr.ocr(pot_img, cls=False)
-        raw_pot = pot_res[0][0][1][0] if pot_res and pot_res[0] else ""
-    print(f"  Raw: '{raw_pot}'")
-    pot_value = parse_bb_value(greedy_pot(raw_pot))
-    print(f"  Parsed: {format_bb(pot_value)}")
+    print("─" * 40)
+    print(f"  Raw: '{pot_text}'")
+    print(f"  Parsed: {pot_val} BB")
 
-    # 6. Action Log Parsing
-    print(f"\n{'─'*40}")
+    # 4. Action Log
+    action_parser = ActionLogParser()
+    action_log_region = layout['regions'].get('action_log')
+    action_crop = engine.crop_region(img, action_log_region) if action_log_region else None
+    
+    print("\n" + "─" * 40)
     print("  ACTION LOG (5-Phase Parser)")
-    print(f"{'─'*40}")
-    streets_data = {}
-    street_pots = {}
-    if 'action_log' in regions:
-        action_img = layout_engine.crop_region(img, regions['action_log'])
-        cv2.imwrite("debug_crop_action.png", action_img)
-        ah, aw = action_img.shape[:2]
-        print(f"  Crop size: {aw}x{ah}")
-
-        action_ocr = ocr.ocr(action_img, cls=False)
-
-        # Calculate sidebar boundary in action_img coordinates
-        sidebar_x = None
-        if 'sidebar' in regions:
-            sidebar_x1_ratio = regions['sidebar']['x1']
-            action_x1_ratio = regions['action_log']['x1']
-            action_x2_ratio = regions['action_log']['x2']
-            # sidebar position within the action_img
-            action_range = action_x2_ratio - action_x1_ratio
-            sidebar_x = int((sidebar_x1_ratio - action_x1_ratio) / action_range * aw) if action_range > 0 else None
-
+    print("─" * 40)
+    
+    parsed = {"streets": {}}
+    if action_crop is not None:
+        print(f"  Crop size: {action_crop.shape[1]}x{action_crop.shape[0]}")
+        
+        # Get river cards for matching (template-only, context='river')
+        river_region = layout['regions'].get('river_column')
+        river_col_crop = engine.crop_region(img, river_region) if river_region else None
+        
+        # Save the base river and action crops for layout debugging
+        if action_crop is not None:
+            cv2.imwrite("debug_crops/layout_action_crop.png", action_crop)
+            print(f"  → Dumped layout crop: debug_crops/layout_action_crop.png")
+        if river_col_crop is not None:
+            cv2.imwrite("debug_crops/layout_river_crop.png", river_col_crop)
+            print(f"  → Dumped layout crop: debug_crops/layout_river_crop.png")
+        river_data = detector.detect_cards_with_info(
+            river_col_crop, context="river"
+        ) if river_col_crop is not None else {"cards": []}
+        river_cards = [c['name'] for c in river_data['cards']]
+        
+        # Debug dump for river cards (detected within action crop)
+        unknown_river = [(i, c) for i, c in enumerate(river_data['cards']) if c['name'] == '??']
+        if unknown_river:
+            print(f"\n  ⚠ {len(unknown_river)} unknown RIVER card(s) — saving debug crops...")
+            for ui_idx, (orig_idx, card_data) in enumerate(unknown_river):
+                if card_data.get('image') is not None:
+                    debug_path = f"debug_river_card_{ui_idx}.png"
+                    cv2.imwrite(debug_path, card_data['image'])
+                    print(f"    → Saved {debug_path} (rect={card_data['rect']})")
+        
+        # Get raw OCR for the action log
+        ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)
+        res = ocr.ocr(action_crop, cls=False)
+        
         parsed = action_parser.parse(
-            action_img, action_ocr, card_detector, ocr, 
-            sidebar_x=sidebar_x, layout_name=layout_name
+            action_crop,
+            res,
+            card_detector=detector,
+            ocr_engine=ocr,
+            layout_name=layout_name
         )
-        streets_data = parsed['streets']
-        street_pots = parsed['street_pots']
 
-        for street_key in STREET_KEYS:
-            entries = streets_data.get(street_key, [])
-            pot = street_pots.get(street_key, "0 BB")
-            if entries or pot != "0 BB":
-                print(f"\n  [{street_key.upper()}] Pot: {pot}")
+        # Debug dump: Chỉ lưu ảnh card đã match với Player
+        all_cards = parsed.get('all_card_rects', [])
+        # Lưu các card đã vào tay người chơi (trên mọi street)
+        idx = 0
+        for street in STREET_KEYS:
+            for entry in parsed['streets'].get(street, []):
+                for c in entry.get('card_objs', []):
+                    card_img = c.get('image')
+                    if card_img is not None:
+                        debug_path = f"debug_player_card_river_{idx}_{c.get('name', 'unknown')}.png"
+                        cv2.imwrite(debug_path, card_img)
+                        print(f"    → MATCHED River card crop dumped: {debug_path}")
+                        idx += 1
+
+        # Print summary
+        for street in STREET_KEYS:
+            entries = parsed['streets'].get(street, [])
+            if entries:
+                print(f"\n  [{street.upper()}] Pot: {parsed['street_pots'].get(street, '0 BB')}")
                 for e in entries:
-                    hand_str = f" [{', '.join(e['hand'])}]" if e.get('hand') else ""
-                    print(f"    {e['player']} | {e['action']} | {e['amount']}{hand_str}")
+                    hand_str = f" | Cards: {e['hand']}" if e.get('hand') else ""
+                    amt_str = f" | {e['amount']}" if e.get('amount') else ""
+                    pos_str = f" ({e['pos']})" if e.get('pos') else ""
+                    print(f"    {e['player']}{pos_str} | {e['action']}{amt_str}{hand_str}")
 
-    # 7. Build player_hands (mirrors tasks.py logic)
-    player_hands: dict = {}
-    # Source 1: hands in action log entries (detected via OCR+color in turn/river)
-    # Also collect card images for learning
-    card_images_map: dict = {}  # player_name -> list of card crop images
-    for sk in STREET_KEYS:
-        for entry in streets_data.get(sk, []):
-            if not isinstance(entry, dict):
-                continue
-            cards = [c for c in entry.get('hand', []) if c and c != '??']
-            if cards and entry.get('player'):
-                name = entry['player']
-                existing = player_hands.get(name, [])
-                merged = (existing + cards)[:2]
-                # If 2 identical cards → suit must be wrong on at least one
-                if len(merged) == 2 and merged[0] == merged[1] and len(merged[0]) >= 2:
-                    rank = merged[0][:-1]  # e.g. "9" from "9d"
-                    merged = [f"{rank}?", f"{rank}?"]
-                player_hands[name] = merged
-                # Collect card images for template learning
-                imgs = entry.get('card_images', [])
-                if imgs:
-                    existing_imgs = card_images_map.get(name, [])
-                    card_images_map[name] = (existing_imgs + imgs)[:2]
-
-
-    # Strip 'hand' from all street action entries (hands belong in player_hands only)
-    for sk in STREET_KEYS:
-        for entry in streets_data.get(sk, []):
-            if isinstance(entry, dict):
-                entry.pop('hand', None)
-                entry.pop('card_images', None)
-
-    # Build positions map
-    positions: dict = {}
-    for sk in STREET_KEYS:
-        for entry in streets_data.get(sk, []):
-            if not isinstance(entry, dict):
-                continue
-            name = entry.get('player', '').strip()
-            pos  = entry.get('pos', '').strip()
-            if name and pos and name not in positions:
-                positions[name] = pos
-
-    if player_hands:
-        # Interactive: let user correct cards with unknown suit (?)
-        for name, cards in list(player_hands.items()):
-            corrected = []
-            images = card_images_map.get(name, [])
-            for i, card in enumerate(cards):
-                if '?' in card or card == '??':
-                    try:
-                        user_input = input(f"  [?] {name} card {i+1} is '{card}'. Correct (e.g. 9h) or Enter to skip: ").strip()
-                        if user_input:
-                            # If user only enters suit letter, prepend the rank from original card
-                            if len(user_input) == 1 and user_input in 'hdcs':
-                                rank = card.replace('?', '')  # "9?" → "9", "??" → ""
-                                if rank:
-                                    user_input = f"{rank}{user_input}"
-                            # Validate: must be a valid card name (rank+suit)
-                            import re
-                            if not re.match(r'^(?:10|[2-9TJQKA])[hdcs]$', user_input, re.IGNORECASE):
-                                print(f"  [!] Invalid card name '{user_input}'. Must be rank+suit (e.g. Qs, Ah, Td). Skipping.")
-                                corrected.append(card)
-                            else:
-                                corrected.append(user_input)
-                                # Learn template if we have the card image
-                                if i < len(images) and images[i] is not None:
-                                    card_detector.learn_card(images[i], user_input, verification_source='user_corrected', layout_name=layout_name)
-                                    print(f"  [LEARN] Saved template: {user_input}")
-                                else:
-                                    print(f"  [!] No card image available for '{user_input}' (images={len(images)}, idx={i}). Template NOT saved.")
-                                    print(f"       To teach this card, correct it during the River card detection step above.")
-                        else:
-                            corrected.append(card)
-                    except EOFError:
-                        corrected.append(card)
-                else:
-                    corrected.append(card)
-            player_hands[name] = corrected
-
-        print(f"\n{'─'*40}")
-        print("  PLAYER HANDS")
-        print(f"{'─'*40}")
-        for name, cards in player_hands.items():
-            print(f"  {name}: {cards}")
-
-    if positions:
-        print(f"\n{'─'*40}")
-        print("  POSITIONS")
-        print(f"{'─'*40}")
-        for name, pos in positions.items():
-            print(f"  {name}: {pos}")
-
-    # 8. Final JSON
-    # Strip pos from action entries — positions are in the 'positions' object
-    for sk in STREET_KEYS:
-        for entry in streets_data.get(sk, []):
-            if isinstance(entry, dict):
-                entry.pop('pos', None)
-
-    hand_data = {
-        "pot": format_bb(pot_value),
+    # Final Output
+    final_result = {
+        "pot": f"{pot_val} BB",
         "board": board_cards,
-        "player_hands": player_hands,
-        "positions": positions,
-        "streets": streets_data,
-        "metadata": {"street_pots": street_pots}
+        "player_hands": {},
+        "positions": {},
+        "streets": parsed['streets'],
+        "metadata": {"street_pots": parsed['street_pots']}
     }
+    
+    # 5. Collect player hands BEFORE cleanup (pop removes them from entries)
+    temp_hands = {}
+    for s in STREET_KEYS:
+        for e in parsed['streets'].get(s, []):
+            if isinstance(e, dict) and e.get('hand') and e.get('player'):
+                temp_hands[e['player']] = e['hand']
+                final_result['player_hands'][e['player']] = e['hand']
 
-    print(f"\n{'='*60}")
-    print("  FINAL OUTPUT")
-    print(f"{'='*60}")
-    print(json.dumps(hand_data, indent=2, ensure_ascii=False))
-    return hand_data
+    # 6. Final Output Cleanup (remove images and redundant data for JSON)
+    for s in STREET_KEYS:
+        for e in parsed['streets'].get(s, []):
+            if isinstance(e, dict):
+                e.pop('image', None)
+                e.pop('card_images', None)
+                e.pop('hand', None)
+            
+            # Populate positions
+            if isinstance(e, dict) and e.get('player'):
+                p_name = e['player']
+                if e.get('pos'):
+                    final_result['positions'][p_name] = e['pos']
 
+    # 7. Pretty report with UTF-8 support
+    o = []
+    o.append("")
+    o.append("╔" + "═"*68 + "╗")
+    o.append("║" + "       WPT GLOBAL OCR — FINAL REPORT".ljust(68) + "║")
+    o.append("╚" + "═"*68 + "╝")
+    
+    # ── Board & Pot ──
+    o.append("")
+    o.append("┌─── BOARD ─────────────────────────────────────────────────────────┐")
+    o.append(f"│  Cards : {' '.join(board_cards):57s} │")
+    
+    # Show pot per street
+    pots = parsed.get('street_pots', {})
+    pot_line = "│  Pots  :"
+    for sk in STREET_KEYS:
+        p = pots.get(sk, '')
+        if p:
+            pot_line += f"  {sk[:4].upper()}={p}"
+    o.append(f"{pot_line:69s} │")
+    o.append("└──────────────────────────────────────────────────────────────────┘")
+    
+    # ── Streets ──
+    for street in STREET_KEYS:
+        entries = final_result['streets'].get(street, [])
+        if not entries:
+            continue
+        
+        pot_val = pots.get(street, '')
+        header = f"  {street.upper()}"
+        if pot_val:
+            header += f"  (Pot: {pot_val})"
+        
+        o.append("")
+        o.append(f"┌─── {street.upper()} " + "─" * max(0, 63 - len(street)) + "┐")
+        o.append(f"│  {'Player':<20s} {'Pos':>4s}   {'Action':<10s} {'Amount':<14s} {'Hand':<10s}  │")
+        o.append("│  " + "─"*64 + "  │")
+        
+        for e in entries:
+            p_name = e.get('player', '?')
+            pos = final_result['positions'].get(p_name, e.get('pos', ''))
+            action = e.get('action', '')
+            amount = e.get('amount', '')
+            # Use temp_hands for river cards (since hands are popped from entries)
+            cards = temp_hands.get(p_name, []) if street == 'river' else []
+            hand_str = ' '.join(cards) if cards else ''
+            
+            # Highlight winner
+            prefix = "★ " if action == 'WINNER' else "  "
+            o.append(f"│{prefix}{p_name:<20s} {pos:>4s}   {action:<10s} {amount:<14s} {hand_str:<10s}  │")
+        
+        o.append("└──────────────────────────────────────────────────────────────────┘")
+    
+    # ── Player Summary ──
+    o.append("")
+    o.append("┌─── PLAYER SUMMARY ────────────────────────────────────────────────┐")
+    o.append(f"│  {'Player':<20s} {'Pos':>4s}   {'Hand':<12s} {'Result':<14s}            │")
+    o.append("│  " + "─"*64 + "  │")
+    
+    # Collect river results for each player
+    river_entries = final_result['streets'].get('river', [])
+    shown_players = set()
+    for e in river_entries:
+        p_name = e.get('player', '?')
+        if p_name in shown_players:
+            continue
+        shown_players.add(p_name)
+        pos = final_result['positions'].get(p_name, '')
+        cards = temp_hands.get(p_name, [])
+        hand_str = ' '.join(cards) if cards else '—'
+        amount = e.get('amount', '')
+        action = e.get('action', '')
+        
+        if action == 'WINNER':
+            result_str = f"WIN {amount}"
+        elif amount.startswith('-'):
+            result_str = f"LOSS {amount}"
+        elif amount:
+            result_str = amount
+        else:
+            result_str = '—'
+        
+        o.append(f"│  {p_name:<20s} {pos:>4s}   {hand_str:<12s} {result_str:<14s}            │")
+    
+    # Add folded players not in river
+    all_players = set()
+    for sk in STREET_KEYS:
+        for e in final_result['streets'].get(sk, []):
+            all_players.add(e.get('player', ''))
+    for p in all_players - shown_players:
+        if not p:
+            continue
+        pos = final_result['positions'].get(p, '')
+        o.append(f"│  {p:<20s} {pos:>4s}   {'—':<12s} {'Folded':<14s}            │")
+    
+    o.append("└──────────────────────────────────────────────────────────────────┘")
+    
+    full_output = "\n".join(o) + "\n"
+    
+    # Write report to console with UTF-8
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout.buffer.write(full_output.encode('utf-8'))
+        sys.stdout.buffer.flush()
+    else:
+        print(full_output)
 
-if __name__ == '__main__':
-    images = sys.argv[1:] if len(sys.argv) > 1 else ["ocrtest2.png"]
-    for img_path in images:
-        test_pipeline(img_path)
+    # --- JSON Serialization Support ---
+    class NumpyEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, np.ndarray):
+                return "<numpy_array>"
+            return super().default(obj)
+
+    # 8. Update summary with player hands and winner
+    # Derive winner from river entries
+    winner_entry = None
+    for e in parsed['streets'].get('river', []):
+        if isinstance(e, dict) and e.get('action') == 'WINNER':
+            winner_entry = {"player": e.get('player', ''), "amount": e.get('amount', '')}
+            break
+    if not winner_entry:
+        winner_entry = parsed.get('winner', {})
+    
+    final_summary = {
+        "board": board_cards,
+        "pot": parsed.get('street_pots', {}).get('river', '0 BB'),
+        "winner": winner_entry,
+        "players": {}
+    }
+    
+    # Populate player hands summary across all streets
+    for street in STREET_KEYS:
+        # Re-fetch original entries from 'parsed' to get hands back
+        for act in parsed['streets'].get(street, []):
+            if not isinstance(act, dict):
+                continue
+            p_name = act.get('player', '')
+            if not p_name:
+                continue
+            if p_name not in final_summary["players"]:
+                final_summary["players"][p_name] = {"hand": [], "actions": []}
+            if act.get('hand'):
+                # Add unique cards
+                for c in act['hand']:
+                    if c not in final_summary["players"][p_name]["hand"]:
+                        final_summary["players"][p_name]["hand"].append(c)
+            final_summary["players"][p_name]["actions"].append({
+                "street": street,
+                "action": act.get('action', ''),
+                "amount": act.get('amount', '')
+            })
+            
+    # Inject final summary into result
+    final_result["summary"] = final_summary
+    final_result["winner"] = winner_entry
+    
+    # Save JSON result
+    with open("ocr_result.json", "w", encoding="utf-8") as f:
+        json.dump(final_result, f, ensure_ascii=False, indent=2, cls=NumpyEncoder)
+    
+    print("\n[✔] Result saved to ocr_result.json")
+
+if __name__ == "__main__":
+    img_path = sys.argv[1] if len(sys.argv) > 1 else "ocrtestMain.png"
+    test_pipeline(img_path)

@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
 import axios from 'axios';
 import { LoggerService, LogType } from '../services/loggerService';
-import { prisma } from '../lib/prisma';
 
 const router = Router();
 
@@ -46,30 +45,6 @@ router.post(
                 { cardName, action, correctedName, imageHex: imageHex.slice(0, 16) + '...' },
                 handId
             );
-
-            // AUTO-LEARNING ENGINE FOR OCR (Fixed Race Condition with upsert)
-            if (action === 'edit') {
-                await prisma.template.upsert({
-                    where: { label_category: { label: correctedName, category: 'card_ocr' } },
-                    update: { weight: { increment: 1 } },
-                    create: { label: correctedName, category: 'card_ocr', weight: 1 }
-                });
-            } else if (action === 'confirm') {
-                await prisma.template.upsert({
-                    where: { label_category: { label: cardName, category: 'card_ocr' } },
-                    update: { weight: { increment: 1 } },
-                    create: { label: cardName, category: 'card_ocr', weight: 1 }
-                });
-            } else if (action === 'reject') {
-                try {
-                    await prisma.template.update({
-                        where: { label_category: { label: cardName, category: 'card_ocr' } },
-                        data: { weight: { decrement: 1 } }
-                    });
-                } catch (e: any) {
-                    // It's perfectly fine if we reject a non-existing template
-                }
-            }
 
             console.log(`[OCR_NEURAL_TRAIN] Transmitting visual map for '${action}'. Card: [${cardName}] -> [${correctedName || ''}] to Core Vision Engine...`);
             
@@ -137,10 +112,9 @@ router.get(
     '/templates/:type/:filename',
     asyncErrorWrapper(async (req: Request, res: Response) => {
         const { type, filename } = req.params;
-        const normalizedType = type === 'card' ? 'cards' : type === 'anchor' ? 'anchors' : type;
         
         try {
-            const response = await axios.get(`${OCR_SERVICE_URL}/templates/${normalizedType}/${filename}`, {
+            const response = await axios.get(`${OCR_SERVICE_URL}/templates/${type}/${filename}`, {
                 responseType: 'stream'
             });
             res.setHeader('Content-Type', response.headers['content-type'] || 'image/png');
@@ -151,6 +125,57 @@ router.get(
                 success: false, 
                 error: 'Failed to fetch template image from Vision Engine.' 
             });
+        }
+    })
+);
+
+/**
+ * GET /api/ocr/failed-cases
+ */
+router.get(
+    '/failed-cases',
+    asyncErrorWrapper(async (req: Request, res: Response) => {
+        try {
+            const response = await axios.get(`${OCR_SERVICE_URL}/failed-cases`);
+            return res.json({ success: true, data: response.data.failed_cases });
+        } catch (err: any) {
+            console.error(`[OCR_SERVICE] Failed to fetch failed cases:`, err.message);
+            return res.status(502).json({ success: false, error: 'Failed to fetch failed cases' });
+        }
+    })
+);
+
+/**
+ * POST /api/ocr/failed-cases/label
+ */
+router.post(
+    '/failed-cases/label',
+    asyncErrorWrapper(async (req: Request, res: Response) => {
+        try {
+            const response = await axios.post(`${OCR_SERVICE_URL}/failed-cases/label`, req.body);
+            return res.json({ success: true, data: response.data });
+        } catch (err: any) {
+            console.error(`[OCR_SERVICE] Failed to label failed case:`, err.message);
+            return res.status(err.response?.status || 502).json({ success: false, error: err.message });
+        }
+    })
+);
+
+/**
+ * GET /api/ocr/templates_failed/:subfolder/:filename
+ */
+router.get(
+    '/templates_failed/:subfolder/:filename',
+    asyncErrorWrapper(async (req: Request, res: Response) => {
+        const { subfolder, filename } = req.params;
+        try {
+            const response = await axios.get(`${OCR_SERVICE_URL}/templates_failed/${subfolder}/${filename}`, {
+                responseType: 'stream'
+            });
+            res.setHeader('Content-Type', response.headers['content-type'] || 'image/png');
+            return response.data.pipe(res);
+        } catch (err: any) {
+            return res.status(err.response?.status || 502).json({ success: false, error: 'Failed' });
         }
     })
 );
