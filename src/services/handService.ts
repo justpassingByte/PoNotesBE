@@ -115,6 +115,31 @@ export class HandService {
             // Parse pot to number
             const potStr = rawData.pot ? String(rawData.pot).replace(/[^\d.]/g, '') : '0';
 
+            // Detect currency from raw amounts
+            const detectCurrency = (raw: any): string => {
+                if (!raw) return 'BB';
+                const str = typeof raw === 'string' ? raw : JSON.stringify(raw);
+                if (str.includes('￥') || str.includes('¥')) return '￥';
+                if (str.includes('$')) return '$';
+                if (str.includes('€')) return '€';
+                return 'BB';
+            };
+            // Infer from pot or first action amount
+            let currency = detectCurrency(rawData.pot);
+            if (currency === 'BB') {
+                // Try first action amount
+                for (const sk of ['preflop', 'flop', 'turn', 'river', 'blinds_ante']) {
+                    const acts = rawData.streets?.[sk];
+                    if (Array.isArray(acts)) {
+                        for (const a of acts) {
+                            const c = detectCurrency(a?.amount);
+                            if (c !== 'BB') { currency = c; break; }
+                        }
+                    }
+                    if (currency !== 'BB') break;
+                }
+            }
+
             const parseAmount = (amt: any): number | undefined => {
                 if (amt === undefined || amt === null) return undefined;
                 if (typeof amt === 'number') return amt;
@@ -163,7 +188,8 @@ export class HandService {
                     river: mapActions(rawData.streets?.river, 'river')
                 },
                 pot: parseFloat(potStr) || 0,
-                street_pots: rawData.metadata?.street_pots || {},
+                currency: currency,
+                street_pots: rawData.street_pots || rawData.metadata?.street_pots || {},
                 showdown: rawData.showdown || rawData.player_hands || {},
             } as any;
 
@@ -175,6 +201,44 @@ export class HandService {
                 breakdown: ocrResponse.confidence?.breakdown || {},
                 performance: ocrResponse.performance || {}
             };
+
+            // Build showdown_players for frontend ShowdownBlock display
+            const showdownPlayers: any[] = [];
+            if (rawData.winner?.player) {
+                showdownPlayers.push({
+                    name: rawData.winner.player,
+                    position: positionsMap[rawData.winner.player] || '',
+                    hole_cards: (rawData.winner.hand || rawData.player_hands?.[rawData.winner.player] || []).map(normalizeCard),
+                    result: 'winner',
+                    resultAmount: String(rawData.winner.amount || '').replace(/[^+\-\d.,]/g, '')
+                });
+            }
+            for (const loser of (rawData.losers || [])) {
+                if (!loser?.player) continue;
+                showdownPlayers.push({
+                    name: loser.player,
+                    position: positionsMap[loser.player] || '',
+                    hole_cards: (loser.hand || rawData.player_hands?.[loser.player] || []).map(normalizeCard),
+                    result: 'loser',
+                    resultAmount: String(loser.amount || '').replace(/[^+\-\d.,]/g, '')
+                });
+            }
+            // Fallback: if no winner/losers but player_hands exist, build from showdown entries
+            if (showdownPlayers.length === 0 && rawData.player_hands) {
+                for (const [name, cards] of Object.entries(rawData.player_hands)) {
+                    if (Array.isArray(cards) && cards.length > 0) {
+                        showdownPlayers.push({
+                            name,
+                            position: positionsMap[name] || '',
+                            hole_cards: (cards as string[]).map(normalizeCard),
+                            result: 'unknown',
+                            resultAmount: ''
+                        });
+                    }
+                }
+            }
+            (parsedData as any).showdown_players = showdownPlayers;
+            console.log('[HandService] showdown_players built:', JSON.stringify(showdownPlayers));
 
             await UsageService.incrementUsage(params.userId, UsageActionType.OCR_HAND, params.tier);
         } else {

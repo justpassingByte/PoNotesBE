@@ -80,7 +80,7 @@ _ACTION_NORMALIZE = {
     "tố": "Raise", "to": "Raise", "tốt": "Raise", "tot": "Raise", "t6": "Raise",
     "theo": "Call",
     "bỏ bài": "Fold", "bo bai": "Fold", "b6 bài": "Fold",
-    "check": "Check", "fold": "Fold", "call": "Call", "raise": "Raise", "all-in": "All-In",
+    "check": "Check", "fold": "Fold", "call": "Call", "raise": "Raise", "bet": "Bet", "all-in": "All-In",
     "tất tay": "All-In", "tố tất": "All-In", "to tat": "All-In",
     "str": "Straddle", "straddle": "Straddle", "strade": "Straddle",
 }
@@ -474,17 +474,23 @@ class ActionLogParser:
                         if not current_entry['action']:
                             current_entry['action'] = norm_act
                         else:
-                            pending_action = norm_act
+                            # We already have an action. The player made a SECOND action.
+                            # Push the current entry and start a new one for the same player.
+                            streets_data[street_key].append(current_entry)
+                            current_entry = {
+                                "player": current_entry['player'],
+                                "pos": current_entry['pos'],
+                                "action": norm_act,
+                                "amount": "",
+                                "hand": [],
+                                "_y": item['y']
+                            }
 
-                        # Use a more liberal regex for amount after action name
-                        # Strip common action keywords AND their substrings to isolate amount
+                        # Match first sequence of digits
                         clean_for_amt = l_clean
                         for kw in ["straddle", "str", "raise", "call", "bet", "tố", "tá", "theo", "check", "fold"]:
                             clean_for_amt = clean_for_amt.replace(kw, "")
                         
-                        print(f"[DBG AMT] l_clean='{l_clean}' action='{norm_act}' clean_for_amt='{clean_for_amt}'")
-                        
-                        # Match first sequence of digits
                         amt_match = re.search(r"(\d[\d\.,\s]*\d|\d)", clean_for_amt)
                         if amt_match:
                             val = amt_match.group(1).strip().replace(" ", "")
@@ -492,12 +498,24 @@ class ActionLogParser:
                             if not current_entry['amount']:
                                 current_entry['amount'] = amt_val
                             else:
-                                pending_amount = amt_val
+                                current_entry['amount'] = amt_val
                     elif is_money:
                         if not current_entry['amount']:
                             current_entry['amount'] = line
                         else:
-                            pending_amount = line
+                            # If amount already exists, same logic: push old, create new
+                            if current_entry['action']:
+                                streets_data[street_key].append(current_entry)
+                                current_entry = {
+                                    "player": current_entry['player'],
+                                    "pos": current_entry['pos'],
+                                    "action": "",
+                                    "amount": line,
+                                    "hand": [],
+                                    "_y": item['y']
+                                }
+                            else:
+                                current_entry['amount'] = line
 
                 elif is_winner:
                     # Winner text found but no current player - skip
@@ -773,23 +791,49 @@ class ActionLogParser:
                 if any(ck in action_lower for ck in CHECK_KEYWORDS) and amt and not amt.startswith('+') and not amt.startswith('-'):
                     entry['amount'] = ''
 
-        # 5c. River: mark +amount as WINNER, -amount as LOSER
+        # 5c/d. River: extract WINNER/LOSER. Non-winners with unsigned amounts in River must be losses (-)
+        # We also move ALL WINNER and LOSER entries into Showdown so they don't pollute River actions.
+        new_river = []
+        has_winner = any(e.get('action') == 'WINNER' or e.get('amount', '').strip().startswith('+') for e in streets_data.get("river", []) + streets_data.get("showdown", []))
+        
         for entry in streets_data.get("river", []):
             amt = entry.get('amount', '').strip()
+            
+            # Identify if it's a result (Win/Loss) rather than an action
+            is_result = False
+            
             if amt.startswith('+'):
                 entry['action'] = "WINNER"
+                is_result = True
             elif amt.startswith('-'):
                 entry['action'] = "LOSER"
+                is_result = True
+            elif has_winner and amt and entry.get('action') not in ('WINNER', 'LOSER', 'Check', 'Fold', 'Call', 'Raise', 'Bet', 'All-In', 'Straddle'):
+                # It has an amount but no known action, and someone already won -> must be a loss
+                entry['amount'] = '-' + amt if not amt.startswith('-') and not amt.startswith('+') else amt
+                entry['action'] = "LOSER"
+                is_result = True
+            
+            # If it's explicitly marked WINNER or LOSER, it goes to showdown
+            if entry.get('action') in ("WINNER", "LOSER") or is_result:
+                streets_data.setdefault('showdown', []).append(entry)
+            else:
+                new_river.append(entry)
+                
+        streets_data["river"] = new_river
 
-        # 5c. Poker logic: non-winners with unsigned amounts in River must be losses (-)
-        has_winner = any(e.get('action') == 'WINNER' for e in streets_data.get("river", []))
-        if has_winner:
-            for entry in streets_data.get("river", []):
+        # 5d. Showdown: hardcode LOSER for unsigned amounts when a WINNER exists
+        # PaddleOCR often fails to read the minus sign (-) so we infer it
+        has_showdown_winner = any(
+            e.get('action') == 'WINNER' or e.get('amount', '').strip().startswith('+')
+            for e in streets_data.get('showdown', [])
+        )
+        if has_showdown_winner:
+            for entry in streets_data.get('showdown', []):
                 amt = entry.get('amount', '').strip()
-                if (amt and entry.get('action') not in ('WINNER', 'LOSER')
-                        and not amt.startswith('-') and not amt.startswith('+')):
+                if amt and not amt.startswith('+') and not amt.startswith('-') and entry.get('action') != 'WINNER':
                     entry['amount'] = '-' + amt
-                    entry['action'] = "LOSER"
+                    entry['action'] = 'LOSER'
 
         # 5e. River/Showdown cleanup: remove players who folded in earlier streets
         # First: identify folded players

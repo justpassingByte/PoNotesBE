@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Initialize Engine Singletons
 ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)  # ch = Chinese + English + Numbers
 layout_engine   = LayoutEngine(config_path="layout_config.json")
-card_detector   = CardDetector(templates_dir="templates/cards")
+card_detector   = CardDetector(templates_dir="templates")
 decision_layer  = DecisionLayer()
 fallback        = FallbackStrategy()
 action_parser   = ActionLogParser()
@@ -368,6 +368,61 @@ def process_hand(image_hex: str, image_hash: str):
             "showdown": showdown_cards,
             "metadata": {"street_pots": street_pots}
         }
+
+        # 12b. Build winner/losers from showdown entries
+        winner_entry = {"player": None, "amount": None, "hand": []}
+        loser_entries = []
+        for e in streets_data.get('showdown', []) + streets_data.get('river', []):
+            if not isinstance(e, dict):
+                continue
+            amt = str(e.get('amount', '')).strip()
+            if amt.startswith('+'):
+                if not winner_entry['player']:
+                    p_name = e.get('player', '')
+                    winner_entry = {
+                        "player": p_name,
+                        "amount": amt,
+                        "hand": player_hands.get(p_name, [])
+                    }
+            elif amt.startswith('-'):
+                p_name = e.get('player', '')
+                loser_entries.append({
+                    "player": p_name,
+                    "amount": amt,
+                    "hand": player_hands.get(p_name, [])
+                })
+
+        # 12c. Build summary (per-player action history + hands)
+        final_summary = {
+            "board": board_cards,
+            "pot": street_pots.get('river', pot_final),
+            "winner": winner_entry,
+            "players": {}
+        }
+        for sk in STREET_KEYS:
+            for act in streets_data.get(sk, []):
+                if not isinstance(act, dict):
+                    continue
+                p_name = act.get('player', '')
+                if not p_name:
+                    continue
+                if p_name not in final_summary["players"]:
+                    final_summary["players"][p_name] = {"hand": [], "actions": []}
+                final_summary["players"][p_name]["actions"].append({
+                    "street": sk,
+                    "action": act.get('action', ''),
+                    "amount": act.get('amount', '')
+                })
+        for p_name, cards in player_hands.items():
+            if p_name not in final_summary["players"]:
+                final_summary["players"][p_name] = {"hand": [], "actions": []}
+            final_summary["players"][p_name]["hand"] = cards
+
+        hand_data["summary"] = final_summary
+        hand_data["winner"] = winner_entry
+        hand_data["losers"] = loser_entries
+
+        logger.info(f"[tasks] Winner: {winner_entry.get('player')} | Losers: {[l['player'] for l in loser_entries]}")
 
         t_end = time.time()
 
