@@ -6,7 +6,7 @@ import json
 import logging
 from celery_worker import celery_app
 from paddleocr import PaddleOCR
-from engine import LayoutEngine, CardDetector, get_suit_from_color
+from engine import LayoutEngine, CardDetector
 from scorer import DecisionLayer, FallbackStrategy, DECISION_AUTO_ACCEPT, DECISION_FORCE_CORRECT
 from action_parser import ActionLogParser, greedy_pot, parse_bb_value, format_bb, STREET_KEYS
 import base64
