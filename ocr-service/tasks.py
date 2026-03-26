@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Initialize Engine Singletons
 ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)  # ch = Chinese + English + Numbers
 layout_engine   = LayoutEngine(config_path="layout_config.json")
-card_detector   = CardDetector(templates_dir="templates/cards", enable_learning=True)
+card_detector   = CardDetector(templates_dir="templates/cards")
 decision_layer  = DecisionLayer()
 fallback        = FallbackStrategy()
 action_parser   = ActionLogParser()
