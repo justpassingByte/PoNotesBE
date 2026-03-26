@@ -122,16 +122,41 @@ def process_hand(image_hex: str, image_hash: str):
                 logger.info("[tasks] Primary detection weak — running FallbackStrategy.")
                 card_info = fallback.apply(board_img, card_detector, ocr, game_phase=None)
 
-            board_cards = [item['name'] for item in card_info]
+        # Smart gap-based padding: use X positions to detect missing cards
+        if card_info:
+            # Sort by X position (left to right)
+            sorted_cards = sorted(card_info, key=lambda c: c['rect'][0])
+            
+            # Calculate gaps between consecutive cards
+            board_cards_ordered = []
+            if len(sorted_cards) < 5 and len(sorted_cards) >= 2:
+                # Find the average card width + gap
+                widths = [c['rect'][2] for c in sorted_cards]
+                avg_w = sum(widths) / len(widths)
+                
+                # Check for large gaps (>1.5x expected card width+gap)
+                for i, card in enumerate(sorted_cards):
+                    if i > 0:
+                        prev_end = sorted_cards[i-1]['rect'][0] + sorted_cards[i-1]['rect'][2]
+                        curr_start = card['rect'][0]
+                        gap = curr_start - prev_end
+                        # If gap is larger than expected (>1.3x avg card width), insert ??
+                        if gap > avg_w * 1.3:
+                            board_cards_ordered.append('??')
+                    board_cards_ordered.append(card['name'])
+            else:
+                board_cards_ordered = [c['name'] for c in sorted_cards]
+            
+            # Pad remaining to 5 cards at the end
+            while len(board_cards_ordered) < 5:
+                board_cards_ordered.append('??')
+            board_cards = board_cards_ordered[:5]
+        else:
+            board_cards = ['??'] * 5
 
-            # Average CV confidence (excluding unknown cards)
-            valid_confs = [item['confidence'] for item in card_info if item['name'] != '??']
-            cv_conf_avg = sum(valid_confs) / len(valid_confs) if valid_confs else 0.0
-
-        # Pad board to always 5 cards (standard poker board)
-        board_cards = [c for c in board_cards if c != '??'][:5]
-        while len(board_cards) < 5:
-            board_cards.append('??')
+        # Average CV confidence (excluding unknown cards)
+        valid_confs = [item['confidence'] for item in card_info if item['name'] != '??'] if card_info else []
+        cv_conf_avg = sum(valid_confs) / len(valid_confs) if valid_confs else 0.0
 
         # 4. Game Phase Prediction
         game_phase = detect_game_phase(board_cards)
