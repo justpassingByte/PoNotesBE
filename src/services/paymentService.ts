@@ -180,6 +180,11 @@ export class PaymentService {
                     }
                 });
 
+                // Reset all usage metrics for this user to give immediate full quota
+                await tx.userUsage.deleteMany({
+                    where: { user_id: invoice.user_id }
+                });
+
                 await tx.paymentEvent.create({
                     data: {
                         invoice_id: invoice.id,

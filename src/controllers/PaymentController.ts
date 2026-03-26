@@ -55,30 +55,8 @@ export class PaymentController extends BaseController {
                 return res.status(400).json({ success: false, error: `Invalid or unavailable tier: ${tierRequested}` });
             }
 
-            // ─── 4. Check for Proration (Upgrade discount) ─────────────────────
-            const currentUser = await prisma.user.findUnique({
-                where: { id: user.id },
-                select: { premium_tier: true, subscription_expiry: true }
-            });
-
             let finalAmount = plan.price;
             let discountApplied = 0;
-
-            // Only prorate if upgrading from a lower paid tier to a higher paid tier
-            if (currentUser?.premium_tier !== 'FREE' && currentUser?.subscription_expiry && currentUser.subscription_expiry > new Date()) {
-                const currentPlan = await prisma.pricingPlan.findUnique({ where: { id: currentUser.premium_tier } });
-                
-                // If requested plan is more expensive than current plan
-                if (currentPlan && plan.price > currentPlan.price) {
-                    const daysRemaining = Math.max(0, (currentUser.subscription_expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                    const dailyValue = currentPlan.price / 30; // Approximation
-                    discountApplied = Math.min(plan.price - 1.0, daysRemaining * dailyValue); // Max discount: leave at least $1
-                    finalAmount = Math.round((plan.price - discountApplied) * 100) / 100; // Round to 2 decimals
-                    
-                    console.log(`[Proration] User ${user.email} upgrading: ${currentUser.premium_tier} -> ${tierRequested}`);
-                    console.log(`[Proration] Days left: ${daysRemaining.toFixed(1)} | Credit: $${discountApplied.toFixed(2)} | Final: $${finalAmount}`);
-                }
-            }
 
             // ─── 5. Create internal invoice (optimistic) ───────────────────
             const invoice = await prisma.invoice.create({

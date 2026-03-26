@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
 import { prisma } from '../lib/prisma';
+import { UsageService } from '../services/usageService';
+import { UsageActionType } from '@prisma/client';
 
 export class AuthController {
     /**
@@ -155,6 +157,9 @@ export class AuthController {
             const totalNotes = await prisma.note.count({ where: { user_id: user.id } });
             const totalPlayers = await prisma.player.count({ where: { user_id: user.id } });
 
+            const aiQuota = await UsageService.checkQuota(user.id, UsageActionType.AI_ANALYZE, user.premium_tier);
+            const handOcrQuota = await UsageService.checkQuota(user.id, UsageActionType.OCR_HAND, user.premium_tier);
+
             res.json({
                 success: true,
                 user: {
@@ -169,6 +174,10 @@ export class AuthController {
                 stats: {
                     totalNotes,
                     totalPlayers,
+                },
+                usage: {
+                    ai: { ...aiQuota, resetsAt: aiQuota.resetsAt.toISOString() },
+                    hand_ocr: { ...handOcrQuota, resetsAt: handOcrQuota.resetsAt.toISOString() },
                 },
                 recentNotes,
             });
