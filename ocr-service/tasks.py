@@ -209,7 +209,8 @@ def process_hand(image_hex: str, image_hash: str):
         if 'pot_area' in regions:
             pot_img = layout_engine.crop_region(img, regions['pot_area'])
             pot_res = ocr.ocr(pot_img, cls=False)
-            raw_pot_text = pot_res[0][0][1][0] if pot_res and pot_res[0] else ""
+            if pot_res and pot_res[0]:
+                raw_pot_text = " ".join([line[1][0] for line in pot_res[0]])
 
         # 9. Action Log Parsing (5-phase matrix from action_parser.py)
         streets_data = {}
