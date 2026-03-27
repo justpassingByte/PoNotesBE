@@ -9,6 +9,7 @@ import { PremiumTier, UsageActionType } from '@prisma/client';
 import { LoggerService, LogType } from './loggerService';
 import OpenAI from 'openai';
 import { PatternEngine } from './analysis/PatternEngine';
+import axios from 'axios';
 export class HandService {
     constructor(
         private readonly handRepository: HandRepository
@@ -423,38 +424,41 @@ export class HandService {
             formData.append('file', blob, `hand.${mimeType.split('/')[1] || 'png'}`);
 
             // Try synchronous endpoint first (eliminates polling overhead)
-            const response = await fetch(`${ocrServiceUrl}/ocr/sync`, { 
-                method: 'POST', 
-                body: formData,
-                headers: { 'Connection': 'close' } // Fix UND_ERR_SOCKET keep-alive reuse bug
-            });
+            try {
+                const response = await axios.post(`${ocrServiceUrl}/ocr/sync`, formData, {
+                    headers: { 'Connection': 'close' },
+                    timeout: 60000 // Ensure we wait for the slow process without dropping
+                });
 
-            if (response.ok) {
-                const data = await response.json();
-                if (data.status === 'success') {
-                    console.log(`[OCR_ENGINE] Sync scan complete. Confidence: ${data.result.confidence?.total || 0}%. Payload extracted!`);
-                    return data.result;
+                if (response.data.status === 'success') {
+                    console.log(`[OCR_ENGINE] Sync scan complete. Confidence: ${response.data.result.confidence?.total || 0}%. Payload extracted!`);
+                    return response.data.result;
                 }
-                throw new Error(data.detail || 'OCR sync failed');
+                throw new Error(response.data.detail || 'OCR sync failed');
+            } catch (syncErr: any) {
+                if (syncErr.response?.status === 404 || syncErr.code === 'ECONNRESET') {
+                    // Fall down to queue if endpoint missing or connection dead
+                } else if (syncErr.response) {
+                    throw new Error(syncErr.response.data?.detail || 'OCR sync failed');
+                } else {
+                    throw syncErr;
+                }
             }
 
             // Fallback: queue + poll (if /ocr/sync not available)
-            console.log('[OCR_ENGINE] Sync endpoint unavailable, falling back to queue+poll...');
-            const queueResponse = await fetch(`${ocrServiceUrl}/ocr`, { 
-                method: 'POST', 
-                body: formData,
-                headers: { 'Connection': 'close' } 
+            console.log('[OCR_ENGINE] Sync endpoint unavailable or connection error, falling back to queue+poll...');
+            const queueResponse = await axios.post(`${ocrServiceUrl}/ocr`, formData, {
+                headers: { 'Connection': 'close' }
             });
-            if (!queueResponse.ok) throw new Error(`OCR Service Error: ${queueResponse.status}`);
 
-            const { job_id } = await queueResponse.json();
+            const { job_id } = queueResponse.data;
             console.log(`[OCR_ENGINE] Sent visual payload. Job ID: ${job_id}. Waiting for core...`);
 
             for (let i = 0; i < 30; i++) {
-                const poll = await fetch(`${ocrServiceUrl}/result/${job_id}`, {
+                const poll = await axios.get(`${ocrServiceUrl}/result/${job_id}`, {
                     headers: { 'Connection': 'close' }
                 });
-                const data = await poll.json();
+                const data = poll.data;
                 if (data.status === 'success') {
                     console.log(`[OCR_ENGINE] Scan Complete (Job: ${job_id}). Confidence: ${data.result.confidence?.total || 0}%. Payload extracted!`);
                     return data.result;
