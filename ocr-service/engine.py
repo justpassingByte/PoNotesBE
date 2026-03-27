@@ -237,12 +237,25 @@ class CardDetector:
         boxBArea = boxB[2] * boxB[3]
         return interArea / float(boxAArea + boxBArea - interArea)
 
-    def _nms(self, detections, iou_threshold=0.3):
+    def _nms(self, detections, iou_threshold=0.15, dist_threshold=15):
         detections = sorted(detections, key=lambda x: x['score'], reverse=True)
         keep = []
         for det in detections:
             overlap = False
+            det_cx = det['x'] + det['w'] / 2.0
+            det_cy = det['y'] + det['h'] / 2.0
+            
             for k in keep:
+                k_cx = k['x'] + k['w'] / 2.0
+                k_cy = k['y'] + k['h'] / 2.0
+                
+                # Suppress if centers are extremely close (same physical symbol)
+                center_dist = math.hypot(det_cx - k_cx, det_cy - k_cy)
+                if center_dist < dist_threshold:
+                    overlap = True
+                    break
+                    
+                # Standard IOU suppression
                 iou = self._bb_iou((det['x'], det['y'], det['w'], det['h']), 
                                    (k['x'], k['y'], k['w'], k['h']))
                 if iou > iou_threshold:
@@ -252,7 +265,7 @@ class CardDetector:
                 keep.append(det)
         return keep
 
-    def _detect_symbols(self, image_gray, templates_dict, threshold=0.75, binarize=False, scales=None):
+    def _detect_symbols(self, image_gray, templates_dict, threshold=0.75, binarize=False, scales=None, color_image=None):
         results = []
         
         if not templates_dict:
@@ -262,6 +275,20 @@ class CardDetector:
             _, binary = cv2.threshold(image_gray, 180, 255, cv2.THRESH_BINARY)
             binary_inv = cv2.bitwise_not(binary)
             search_images = [binary, binary_inv]
+            
+            # Red suits (hearts/diamonds) on dark backgrounds have low grayscale
+            # values (~60 for pure red) so they vanish during gray binarization.
+            # Binarize the isolated Red channel to catch them.
+            if color_image is not None and len(color_image.shape) == 3:
+                b_ch, _g_ch, r_ch = cv2.split(color_image)
+                _, red_binary = cv2.threshold(r_ch, 120, 255, cv2.THRESH_BINARY)
+                # Suppress blue-heavy pixels to avoid false positives from blue UI
+                blue_mask = b_ch > r_ch
+                red_binary[blue_mask] = 0
+                red_binary_inv = cv2.bitwise_not(red_binary)
+                # red_binary  = white suit on black bg → matches *_board templates
+                # red_binary_inv = black suit on white bg → matches *_small templates
+                search_images.extend([red_binary, red_binary_inv])
         else:
             search_images = [image_gray]
         
@@ -293,10 +320,16 @@ class CardDetector:
                     
                     for pt in zip(*loc[::-1]):
                         score = float(res[pt[1], pt[0]])
-                        results.append({
-                            'label': label, 'score': score,
-                            'x': pt[0], 'y': pt[1], 'w': tw, 'h': th
-                        })
+                        
+                        # Penalize generic/thin shapes that easily raise false positives (J, 7)
+                        if label in ['J', '7', '1', 'I']:
+                            score -= 0.06
+                            
+                        if score >= threshold:
+                            results.append({
+                                'label': label, 'score': score,
+                                'x': pt[0], 'y': pt[1], 'w': tw, 'h': th
+                            })
                 
         # NMS locally for this category
         return self._nms(results, iou_threshold=0.2)
@@ -336,7 +369,7 @@ class CardDetector:
             
         logger.warning(f"[FailedCaseManager] Triggered! Context='{context}'. Saved region to {img_path}")
 
-    def _group_symbols(self, ranks, suits):
+    def _group_symbols(self, ranks, suits, context="board"):
         paired_cards = []
         used_suits = set()
         
@@ -348,7 +381,7 @@ class CardDetector:
             r_cy = r['y'] + r['h'] / 2.0
             
             best_suit = None
-            best_score = -1  # Pick highest score, not closest distance
+            best_match_val = -999  # Combined score - dist penalty
             
             for s_idx, s in enumerate(suits):
                 if s_idx in used_suits:
@@ -359,10 +392,17 @@ class CardDetector:
                 dx = abs(r_cx - s_cx)
                 dy = s_cy - r_cy  # Suit should be BELOW rank
                 
+                # Context-specific bounds
+                max_dx = 80 if context == "board" else 40
+                max_dy = 120 if context == "board" else 70
+                
                 # Heuristic bounds: Rank is above Suit, horizontally close
-                if dx < 80 and 0 < dy < 120:
-                    if s['score'] > best_score:
-                        best_score = s['score']
+                if dx < max_dx and 0 < dy < max_dy:
+                    # Score drops by 0.1 for every 10 pixels of horizontal drift
+                    penalty = (dx / 10.0) * 0.1
+                    match_val = s['score'] - penalty
+                    if match_val > best_match_val:
+                        best_match_val = match_val
                         best_suit = s_idx
             
             if best_suit is not None:
@@ -415,18 +455,80 @@ class CardDetector:
             rank_scales = [1.0, 1.1] # Board cards are large (full size)
             suit_tmpls = self.suit_templates_board
             suit_scales = [1.0, 1.1]
-            suit_threshold = 0.9
+            suit_threshold = 0.80
+            rank_threshold = 0.75
         else:
             # River/Action column showdown cards are smaller
             rank_scales = [0.5, 0.6] 
             suit_tmpls = self.suit_templates_small if self.suit_templates_small else self.suit_templates_board
-            # If using small-sized suit templates, search near original size (1.0)
-            # If fallback to board templates, must scale down (0.5-0.6)
-            suit_scales = [1.0] if self.suit_templates_small else [0.5, 0.6]
-            suit_threshold = 0.75
+            # Scale tolerance for small templates
+            suit_scales = [0.9, 1.0, 1.1] if self.suit_templates_small else [0.5, 0.6]
+            suit_threshold = 0.70
+            rank_threshold = 0.70
 
-        ranks = self._detect_symbols(gray, self.rank_templates, threshold=0.7, binarize=True, scales=rank_scales)
-        suits = self._detect_symbols(gray, suit_tmpls, threshold=suit_threshold, scales=suit_scales)
+        ranks = self._detect_symbols(gray, self.rank_templates, threshold=rank_threshold, binarize=True, scales=rank_scales)
+        # CRITICAL: pass color_image so red-channel binarization catches red suits on dark backgrounds
+        suits = self._detect_symbols(gray, suit_tmpls, threshold=suit_threshold, binarize=True, scales=suit_scales, color_image=board_img)
+        
+        # For river/small context: also try board templates at reduced scales as fallback.
+        # Small templates (black-on-white) may not match red suits on dark backgrounds even with
+        # red_binary_inv, but board templates (white-on-black) match well against red_binary
+        # (white suit from R-channel isolation on black background).
+        if context != "board" and self.suit_templates_board:
+            fallback_scales = [0.4, 0.5, 0.6, 0.7]
+            suits_fallback = self._detect_symbols(gray, self.suit_templates_board, threshold=suit_threshold, binarize=True, scales=fallback_scales, color_image=board_img)
+            if suits_fallback:
+                logger.debug(f"[CardDetector] river fallback: {len(suits_fallback)} extra suit hits from board templates")
+                # Merge and deduplicate via NMS
+                suits = self._nms(suits + suits_fallback, iou_threshold=0.2)
+        
+        # Apply Color Check Penalty to Suits (Red vs Black)
+        filtered_suits = []
+        for s in suits:
+            label = s['label']
+            x, y, w, h = s['x'], s['y'], s['w'], s['h']
+            roi = board_img[y:y+h, x:x+w]
+            
+            if roi.size > 0:
+                # Since auto-generated templates are perfectly symmetrically centered around the symbol,
+                # we can confidently sample the very center of the bounding box to test color,
+                # Since templates generated via contour cropping are symmetrically centered,
+                # we can confidently sample the very center of the bounding box to test color,
+                # completely avoiding any dark table edges!
+                cy, cx = h // 2, w // 2
+                patch_size = max(1, min(3, h // 4, w // 4)) 
+                
+                py1, py2 = max(0, cy - patch_size), min(h, cy + patch_size + 1)
+                px1, px2 = max(0, cx - patch_size), min(w, cx + patch_size + 1)
+                patch = roi[py1:py2, px1:px2]
+                
+                if patch.size > 0:
+                    b, g, r = cv2.mean(patch)[:3]
+                else:
+                    b, g, r = [float(v) for v in roi[cy, cx]]
+                
+                # If the sampled pixel is white/near-white, the suit symbol itself
+                # is rendered in white (e.g. on blue card backgrounds). Color is
+                # ambiguous in this case — trust the template shape match instead.
+                min_ch = min(r, g, b)
+                max_ch = max(r, g, b)
+                is_white = min_ch > 180 and (max_ch - min_ch) < 40
+                
+                if not is_white:
+                    # Red suits have a dominant R channel
+                    is_red_actual = r > b + 25 and r > g + 25 and r > 80
+                    is_red_tmpl = 'heart' in label or 'diamond' in label
+                    
+                    if is_red_tmpl != is_red_actual:
+                        logger.debug(f"  Suit {label} REJECTED for color mismatch (R={r:.0f}, G={g:.0f}, B={b:.0f})")
+                        continue  # Drop entirely if color is fundamentally wrong
+                else:
+                    logger.debug(f"  Suit {label} SKIPPED color check — white pixel (R={r:.0f}, G={g:.0f}, B={b:.0f})")
+                    
+            filtered_suits.append(s)
+
+        
+        suits = filtered_suits
         
         logger.debug(f"[CardDetector] {context}: {len(ranks)} rank hits, {len(suits)} suit hits")
         for r in ranks:
@@ -447,7 +549,7 @@ class CardDetector:
             self._save_debug(debug_img, f"symbols_matched_{context}")
 
         # Grouping Logic
-        paired_cards = self._group_symbols(ranks, suits)
+        paired_cards = self._group_symbols(ranks, suits, context=context)
         
         # Sorting Logic
         if context == "board":

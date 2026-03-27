@@ -590,25 +590,34 @@ class ActionLogParser:
                     key=lambda c: (c['y'], c['x'])
                 )
                 
-                print(f"  [Card Match] {len(river_cards)} card rects in river column")
-                for card in river_cards:
-                    card_y = card['y']
-                    best_entry = None
-                    best_dist = 150  # Real card pairs are ~50px from player entry
-                    candidates = sorted(entries_with_y, key=lambda e: abs(card_y - e['_y']))
-                    for entry in candidates:
-                        dist = abs(card_y - entry['_y'])
-                        if dist < 150 and len(entry.get('hand', [])) < 2:
-                            best_entry = entry
-                            best_dist = dist
-                            break
-                    if best_entry:
-                        best_entry['hand'].append(card['name'])
+                # Map cards by iterating OVER players, so fake overlapping cards don't steal slots.
+                # Find all cards close to each player, then pick the Top 2 highest confidence ones.
+                assigned_cards = set()
+                for entry in entries_with_y:
+                    player_y = entry['_y']
+                    # Find all cards within ~100px of this player
+                    candidates = []
+                    for cid, card in enumerate(river_cards):
+                        if cid in assigned_cards: continue
+                        dist = abs(card['y'] - player_y)
+                        if dist < 110:  # Card pairs can be slightly offset natively, 110px is safe given ~150px spacing
+                            candidates.append((dist, cid, card))
+                            
+                    # Sort candidates primarily by confidence (descending) so real cards beat fake ones
+                    candidates.sort(key=lambda x: (x[2].get('confidence', 0), -x[0]), reverse=True)
+                    
+                    # Take up to 2 cards
+                    taken = candidates[:2]
+                    # Restore left-to-right order for the picked cards
+                    taken.sort(key=lambda x: x[2]['x'])
+                    
+                    for dist, cid, card in taken:
+                        assigned_cards.add(cid)
+                        entry.setdefault('hand', []).append(card['name'])
                         if card.get('image') is not None:
-                            best_entry.setdefault('card_images', []).append(card['image'])
-                        print(f"    [Card Match] card={card['name']} Y={card_y:.0f} → {best_entry.get('player','')} (entry_Y={best_entry.get('_y',0):.0f}, dist={best_dist:.0f})")
-                    else:
-                        print(f"    [Card Match] card={card['name']} Y={card_y:.0f} → SKIP (no entry nearby)")
+                            entry.setdefault('card_images', []).append(card['image'])
+                        print(f"    [Card Match] player={entry.get('player','')} picked card={card['name']} Y={card['y']:.0f} (dist={dist:.0f}, conf={card.get('confidence',0):.2f})")
+
 
                 # Store ALL card rects for debug dumping
                 all_card_rects = []
