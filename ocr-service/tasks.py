@@ -58,8 +58,8 @@ def process_hand(image_hex: str, image_hash: str):
     Main OCR processing task with hybrid validation pipeline.
     Returns structured hand data + confidence breakdown.
     """
-    # ── HOTFIX: Always reload global templates so we don't use stale worker memory ──
-    card_detector._load_templates()
+    # Smart reload: only re-read templates when files on disk have actually changed
+    card_detector.reload_if_changed()
     
     start_time = time.time()
     try:

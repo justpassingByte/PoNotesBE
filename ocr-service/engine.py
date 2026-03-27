@@ -1,10 +1,11 @@
+import re
+import os
+import json
+import logging
+import time
+
 import cv2
 import numpy as np
-import json
-import os
-import time
-import math
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 # Card Recognition Utilities
 # ─────────────────────────────────────────────
 
-VALID_RANKS = {'a', 'k', 'q', 'j', 't', '10', '9', '8', '7', '6', '5', '4', '3', '2'}
+VALID_RANKS = frozenset({'a', 'k', 'q', 'j', 't', '10', '9', '8', '7', '6', '5', '4', '3', '2'})
 
 RANK_MAP = {
     '10': '10', '1o': '10', 'io': '10', 'l0': '10',
@@ -23,63 +24,76 @@ RANK_MAP = {
     'ok': 'K', 'oq': 'Q', 'oj': 'J',
 }
 
+# Pre-compiled regex patterns (avoid re-compiling per call)
+_RE_RANK_SUIT = re.compile(r'^((?:10|[2-9TJQKA]))([HDCS])$', re.IGNORECASE)
+_RE_RANK_SUIT_VALID = re.compile(r'^(?:10|[2-9TJQKA])[HDCS]$', re.IGNORECASE)
+
 
 def normalize_card_rank(name):
     """Normalize OCR text to standard poker card rank. Returns (rank, suit_hint)."""
     n = name.strip()
+
     # Check for rank+suit pattern (e.g. '8d', 'Ah', '10s')
-    suit_hint = None
-    import re
-    m = re.match(r'^((?:10|[2-9TJQKA]))([HDCS])$', n, re.IGNORECASE)
+    m = _RE_RANK_SUIT.match(n)
     if m:
         return m.group(1).upper(), m.group(2).lower()
-    
+
     # Existing logic for rank-only or partials
     lower = n.lower()
     if lower in RANK_MAP:
         return RANK_MAP[lower], None
     if lower in VALID_RANKS:
         return (n.upper() if len(n) == 1 else n), None
+
     if len(n) >= 2:
+        first_lower = n[0].lower()
         # Check for '08' -> '8', 'o8' -> '8' etc
-        if n[0] == '0' or n[0].lower() == 'o':
+        if n[0] == '0' or first_lower == 'o':
             rest = n[1:].lower()
             if rest in VALID_RANKS:
                 return (rest.upper() if len(rest) == 1 else rest), None
             if rest in RANK_MAP:
                 return RANK_MAP[rest], None
-        # Handle cases where suit might be there but not matched by regex (e.g. '8.' or '8 ')
-        first = n[0].lower()
-        if first in VALID_RANKS:
-            return first.upper(), None
-        if first in RANK_MAP:
-            return RANK_MAP[first], None
+        # Handle cases where suit might be there but not matched by regex
+        if first_lower in VALID_RANKS:
+            return first_lower.upper(), None
+        if first_lower in RANK_MAP:
+            return RANK_MAP[first_lower], None
+
     return n, None
 
 
 def is_valid_card_rank(name):
     """Check if text looks like a valid poker card rank."""
     lower = name.strip().lower()
-    # If it's rank+suit, it's valid
-    import re
-    if re.match(r'^(?:10|[2-9TJQKA])[HDCS]$', lower, re.IGNORECASE):
+    if _RE_RANK_SUIT_VALID.match(lower):
         return True
     return lower in VALID_RANKS or lower in RANK_MAP
 
-
-# Removed get_suit_from_color as suit is now detected via symbol templates
 
 # ─────────────────────────────────────────────
 # LayoutEngine
 # ─────────────────────────────────────────────
 class LayoutEngine:
     def __init__(self, config_path="layout_config.json"):
-        if not os.path.exists(config_path):
-            self.config = {"layouts": []}
-        else:
+        if os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 self.config = json.load(f)
+        else:
+            self.config = {"layouts": []}
         self.templates_dir = "templates/anchors"
+        self._x_scale = 1.0
+
+        # Cache anchor templates at init — avoid cv2.imread per frame
+        self._anchor_cache = {}
+        for layout in self.config.get('layouts', []):
+            anchor_file = layout.get('anchor_file')
+            if anchor_file:
+                template_path = os.path.join(self.templates_dir, anchor_file)
+                if os.path.exists(template_path):
+                    img = cv2.imread(template_path, 0)
+                    if img is not None:
+                        self._anchor_cache[anchor_file] = img
 
     def match_layout(self, image, ocr_engine=None):
         """
@@ -104,22 +118,20 @@ class LayoutEngine:
 
         best_match = None
         max_score = -1
+        anchor_weight = 0.6 if ocr_results else 0.7
 
         for layout in self.config.get('layouts', []):
             score = 0.0
 
-            # Signal 1: Anchor template matching (weight 70% when no OCR)
-            anchor_weight = 0.6 if ocr_results else 0.7
+            # Signal 1: Anchor template matching (from cache)
             anchor_file = layout.get('anchor_file')
             if anchor_file:
-                template_path = os.path.join(self.templates_dir, anchor_file)
-                if os.path.exists(template_path):
-                    template = cv2.imread(template_path, 0)
-                    if template is not None:
-                        res = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
-                        _, cur_max_val, _, _ = cv2.minMaxLoc(res)
-                        score += cur_max_val * anchor_weight
-                        logger.debug(f"[LayoutEngine] {layout['name']} anchor score: {cur_max_val:.3f}")
+                template = self._anchor_cache.get(anchor_file)
+                if template is not None:
+                    res = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
+                    _, cur_max_val, _, _ = cv2.minMaxLoc(res)
+                    score += cur_max_val * anchor_weight
+                    logger.debug(f"[LayoutEngine] {layout['name']} anchor score: {cur_max_val:.3f}")
 
             # Signal 2: OCR keyword match (weight 30%, skipped if no OCR)
             keyword = layout.get('anchor_text', '').lower()
@@ -132,13 +144,14 @@ class LayoutEngine:
             # Signal 3: Aspect ratio — gradual penalty (not cliff)
             target_ratio = layout.get('aspect_ratio', 1.77)
             ratio_diff = abs(aspect_ratio - target_ratio)
-            
+
             if ratio_diff < 0.2:
-                score += 0.1   # Good match bonus
+                score += 0.1
             else:
-                score -= min(ratio_diff * 0.3, 0.2)  # Gradual, capped at -0.2
-            
-            if score > layout.get('threshold', 0.5) and score > max_score:
+                score -= min(ratio_diff * 0.3, 0.2)
+
+            threshold = layout.get('threshold', 0.5)
+            if score > threshold and score > max_score:
                 max_score = score
                 best_match = (layout, score)
 
@@ -147,12 +160,9 @@ class LayoutEngine:
             matched_layout = best_match[0]
             target_ratio = matched_layout.get('aspect_ratio', aspect_ratio)
             sidebar_region = matched_layout.get('regions', {}).get('sidebar')
-            
+
             if sidebar_region and aspect_ratio < target_ratio * 0.85:
-                # Sidebar was likely cropped — calculate x-scale factor
-                sidebar_x1 = sidebar_region.get('x1', 0.8)
-                # Content area is 0..sidebar_x1 in original, but 0..1.0 in cropped image
-                self._x_scale = sidebar_x1
+                self._x_scale = sidebar_region.get('x1', 0.8)
                 logger.info(f"[LayoutEngine] Sidebar crop detected: x_scale={self._x_scale:.2f}")
             else:
                 self._x_scale = 1.0
@@ -162,199 +172,316 @@ class LayoutEngine:
     def crop_region(self, image, region_coords):
         """Crop region with automatic sidebar compensation."""
         h, w = image.shape[:2]
-        x_scale = getattr(self, '_x_scale', 1.0)
-        
+        x_scale = self._x_scale
+
         # Scale x-coordinates if sidebar was cropped
-        rx1 = region_coords['x1'] / x_scale if x_scale < 1.0 else region_coords['x1']
-        rx2 = region_coords['x2'] / x_scale if x_scale < 1.0 else region_coords['x2']
-        
+        if x_scale < 1.0:
+            rx1 = region_coords['x1'] / x_scale
+            rx2 = region_coords['x2'] / x_scale
+        else:
+            rx1 = region_coords['x1']
+            rx2 = region_coords['x2']
+
         # Clamp to [0, 1]
-        rx1, rx2 = max(0, min(1, rx1)), max(0, min(1, rx2))
-        
-        x1, y1 = int(rx1 * w), int(region_coords['y1'] * h)
-        x2, y2 = int(rx2 * w), int(region_coords['y2'] * h)
+        rx1 = max(0.0, min(1.0, rx1))
+        rx2 = max(0.0, min(1.0, rx2))
+
+        x1 = int(rx1 * w)
+        y1 = int(region_coords['y1'] * h)
+        x2 = int(rx2 * w)
+        y2 = int(region_coords['y2'] * h)
+
         return image[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
 
 
 # ─────────────────────────────────────────────
 # CardDetector
 # ─────────────────────────────────────────────
+
+# Labels that easily raise false positives due to thin/generic shapes
+_PENALIZED_LABELS = frozenset({'J', '7', '1', 'I'})
+
+# Context-specific configuration
+_CONTEXT_CONFIG = {
+    "board": {
+        "rank_scales": [1.0, 1.1],
+        "suit_scales": [1.0, 1.1],
+        "suit_threshold": 0.80,
+        "rank_threshold": 0.75,
+        "max_dx": 80,
+        "max_dy": 120,
+    },
+    "_default": {
+        "rank_scales": [0.5, 0.6],
+        "suit_scales_small": [0.9, 1.0, 1.1],
+        "suit_scales_board_fallback": [0.5, 0.6],
+        "suit_threshold": 0.70,
+        "rank_threshold": 0.70,
+        "max_dx": 40,
+        "max_dy": 70,
+        "fallback_scales": [0.4, 0.5, 0.6, 0.7],
+    },
+}
+
+# Collect every unique scale used across all contexts — pre-compute these at load time
+_ALL_SCALES = set()
+for _cfg in _CONTEXT_CONFIG.values():
+    for _key, _val in _cfg.items():
+        if isinstance(_val, list) and _key.endswith('scales') or _key.endswith('_scales') or 'scale' in _key:
+            _ALL_SCALES.update(_val)
+# Also include the default fallback scales
+_ALL_SCALES.update([0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2])
+_ALL_SCALES = sorted(_ALL_SCALES)
+
+
+def _prescale_template(img, scales=_ALL_SCALES):
+    """Pre-compute all scaled variants of a template image. Returns {scale: img}."""
+    scaled = {}
+    for s in scales:
+        if s == 1.0:
+            scaled[s] = img
+        else:
+            interp = cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR
+            resized = cv2.resize(img, None, fx=s, fy=s, interpolation=interp)
+            # Skip degenerate sizes
+            if resized.shape[0] >= 5 and resized.shape[1] >= 5:
+                scaled[s] = resized
+    return scaled
+
+
 class CardDetector:
     def __init__(self, templates_dir="templates"):
         self.templates_dir = templates_dir
         self.ranks_dir = os.path.join(templates_dir, "ranks")
         self.suits_dir = os.path.join(templates_dir, "suits")
-        
+
         self.rank_templates = {}
         self.suit_templates_board = {}   # *_board.png — large, for board cards
         self.suit_templates_small = {}   # *_small.png — small, for river/showdown
         self._load_templates()
+        self._templates_mtime = self._snapshot_mtime()
+
+        self._debug_dir = os.path.join(os.path.dirname(templates_dir), "debug_crops")
+        self._failed_dir = os.path.join(os.path.dirname(templates_dir), "templates_failed", "raw")
+        self._debug_dir_created = False
+        self._failed_dir_created = False
+
+    def _snapshot_mtime(self):
+        """Collect {filename: mtime} for all .png files in ranks/ and suits/ dirs."""
+        snapshot = {}
+        for directory in (self.ranks_dir, self.suits_dir):
+            if not os.path.isdir(directory):
+                continue
+            for f in os.listdir(directory):
+                if f.endswith('.png'):
+                    path = os.path.join(directory, f)
+                    try:
+                        snapshot[path] = os.path.getmtime(path)
+                    except OSError:
+                        pass
+        return snapshot
+
+    def reload_if_changed(self):
+        """Reload templates only when files on disk have actually changed."""
+        current = self._snapshot_mtime()
+        if current != self._templates_mtime:
+            logger.info("[CardDetector] Template files changed on disk — reloading.")
+            self.rank_templates.clear()
+            self.suit_templates_board.clear()
+            self.suit_templates_small.clear()
+            self._load_templates()
+            self._templates_mtime = current
 
     def _load_templates(self):
-        # Load rank templates
-        if not os.path.exists(self.ranks_dir):
-            os.makedirs(self.ranks_dir, exist_ok=True)
-        for f in os.listdir(self.ranks_dir):
-            if f.endswith('.png'):
-                path = os.path.join(self.ranks_dir, f)
-                img = cv2.imread(path, 0)
-                if img is not None:
-                    label = f.split('_')[0].split('.')[0]
-                    self.rank_templates[f] = {'label': label, 'img': img}
-        
-        # Load suit templates — split by size
-        if not os.path.exists(self.suits_dir):
-            os.makedirs(self.suits_dir, exist_ok=True)
-        for f in os.listdir(self.suits_dir):
-            if f.endswith('.png'):
-                path = os.path.join(self.suits_dir, f)
-                img = cv2.imread(path, 0)
-                if img is not None:
-                    label = f.split('_')[0].split('.')[0]
-                    entry = {'label': label, 'img': img}
-                    if '_small' in f:
-                        self.suit_templates_small[f] = entry
-                    elif '_board' in f:
-                        self.suit_templates_board[f] = entry
-                    else:
-                        self.suit_templates_board[f] = entry  # default to board
+        """Load rank and suit template images from disk."""
+        self._load_template_dir(
+            self.ranks_dir,
+            target=self.rank_templates,
+        )
+        self._load_template_dir(
+            self.suits_dir,
+            target=None,  # routed by suffix
+        )
+
+    def _load_template_dir(self, directory, target=None):
+        """Load .png templates from a directory into the appropriate dict."""
+        os.makedirs(directory, exist_ok=True)
+        for f in os.listdir(directory):
+            if not f.endswith('.png'):
+                continue
+            img = cv2.imread(os.path.join(directory, f), 0)
+            if img is None:
+                continue
+
+            label = f.split('_')[0].split('.')[0]
+            scaled = _prescale_template(img)
+            entry = {'label': label, 'img': img, 'scaled': scaled}
+
+            if target is not None:
+                # Rank templates
+                target[f] = entry
+            else:
+                # Suit templates — route by filename suffix
+                if '_small' in f:
+                    self.suit_templates_small[f] = entry
+                else:
+                    # '_board' or default
+                    self.suit_templates_board[f] = entry
 
     def _save_debug(self, img, step_name):
-        debug_dir = os.path.join(os.path.dirname(self.templates_dir), "debug_crops")
-        os.makedirs(debug_dir, exist_ok=True)
+        if not self._debug_dir_created:
+            os.makedirs(self._debug_dir, exist_ok=True)
+            self._debug_dir_created = True
         ts = int(time.time() * 1000)
-        path = os.path.join(debug_dir, f"{ts}_{step_name}.png")
-        cv2.imwrite(path, img)
+        cv2.imwrite(os.path.join(self._debug_dir, f"{ts}_{step_name}.png"), img)
 
-    def _bb_iou(self, boxA, boxB):
+    @staticmethod
+    def _bb_iou(boxA, boxB):
+        """Compute intersection-over-union for two (x, y, w, h) boxes."""
         xA = max(boxA[0], boxB[0])
         yA = max(boxA[1], boxB[1])
         xB = min(boxA[0] + boxA[2], boxB[0] + boxB[2])
         yB = min(boxA[1] + boxA[3], boxB[1] + boxB[3])
-        interArea = max(0, xB - xA) * max(0, yB - yA)
-        if interArea == 0: return 0.0
-        boxAArea = boxA[2] * boxA[3]
-        boxBArea = boxB[2] * boxB[3]
-        return interArea / float(boxAArea + boxBArea - interArea)
+
+        inter = max(0, xB - xA) * max(0, yB - yA)
+        if inter == 0:
+            return 0.0
+
+        union = boxA[2] * boxA[3] + boxB[2] * boxB[3] - inter
+        return inter / float(union)
 
     def _nms(self, detections, iou_threshold=0.15, dist_threshold=15):
-        detections = sorted(detections, key=lambda x: x['score'], reverse=True)
+        """Non-maximum suppression by score, center distance, and IoU."""
+        detections.sort(key=lambda x: x['score'], reverse=True)
         keep = []
+        dist_threshold_sq = dist_threshold * dist_threshold
+
         for det in detections:
-            overlap = False
-            det_cx = det['x'] + det['w'] / 2.0
-            det_cy = det['y'] + det['h'] / 2.0
-            
+            det_cx = det['x'] + det['w'] * 0.5
+            det_cy = det['y'] + det['h'] * 0.5
+            suppressed = False
+
             for k in keep:
-                k_cx = k['x'] + k['w'] / 2.0
-                k_cy = k['y'] + k['h'] / 2.0
-                
+                k_cx = k['x'] + k['w'] * 0.5
+                k_cy = k['y'] + k['h'] * 0.5
+
                 # Suppress if centers are extremely close (same physical symbol)
-                center_dist = math.hypot(det_cx - k_cx, det_cy - k_cy)
-                if center_dist < dist_threshold:
-                    overlap = True
+                # Use squared distance to avoid sqrt overhead
+                dx = det_cx - k_cx
+                dy = det_cy - k_cy
+                if dx * dx + dy * dy < dist_threshold_sq:
+                    suppressed = True
                     break
-                    
+
                 # Standard IOU suppression
-                iou = self._bb_iou((det['x'], det['y'], det['w'], det['h']), 
-                                   (k['x'], k['y'], k['w'], k['h']))
+                iou = self._bb_iou(
+                    (det['x'], det['y'], det['w'], det['h']),
+                    (k['x'], k['y'], k['w'], k['h']),
+                )
                 if iou > iou_threshold:
-                    overlap = True
+                    suppressed = True
                     break
-            if not overlap:
+
+            if not suppressed:
                 keep.append(det)
+
         return keep
 
-    def _detect_symbols(self, image_gray, templates_dict, threshold=0.75, binarize=False, scales=None, color_image=None):
-        results = []
-        
+    def _build_search_images(self, image_gray, color_image):
+        """
+        Pre-compute all binarized search images once per frame.
+        Returns list of grayscale images to match templates against.
+        """
+        _, binary = cv2.threshold(image_gray, 180, 255, cv2.THRESH_BINARY)
+        binary_inv = cv2.bitwise_not(binary)
+        search_images = [binary, binary_inv]
+
+        # Red suits (hearts/diamonds) on dark backgrounds have low grayscale
+        # values (~60 for pure red) so they vanish during gray binarization.
+        # Binarize the isolated Red channel to catch them.
+        if color_image is not None and len(color_image.shape) == 3:
+            # Zero-copy numpy slicing instead of cv2.split() which allocates 3 arrays
+            r_ch = color_image[:, :, 2]
+            b_ch = color_image[:, :, 0]
+            _, red_binary = cv2.threshold(r_ch, 120, 255, cv2.THRESH_BINARY)
+            # Suppress blue-heavy pixels to avoid false positives from blue UI
+            red_binary[b_ch > r_ch] = 0
+            search_images.append(red_binary)
+            search_images.append(cv2.bitwise_not(red_binary))
+
+        return search_images
+
+    def _detect_symbols(self, image_gray, templates_dict, threshold=0.75,
+                        scales=None, search_images=None):
+        """Detect symbols via multi-scale template matching."""
         if not templates_dict:
             return []
 
-        if binarize:
-            _, binary = cv2.threshold(image_gray, 180, 255, cv2.THRESH_BINARY)
-            binary_inv = cv2.bitwise_not(binary)
-            search_images = [binary, binary_inv]
-            
-            # Red suits (hearts/diamonds) on dark backgrounds have low grayscale
-            # values (~60 for pure red) so they vanish during gray binarization.
-            # Binarize the isolated Red channel to catch them.
-            if color_image is not None and len(color_image.shape) == 3:
-                b_ch, _g_ch, r_ch = cv2.split(color_image)
-                _, red_binary = cv2.threshold(r_ch, 120, 255, cv2.THRESH_BINARY)
-                # Suppress blue-heavy pixels to avoid false positives from blue UI
-                blue_mask = b_ch > r_ch
-                red_binary[blue_mask] = 0
-                red_binary_inv = cv2.bitwise_not(red_binary)
-                # red_binary  = white suit on black bg → matches *_board templates
-                # red_binary_inv = black suit on white bg → matches *_small templates
-                search_images.extend([red_binary, red_binary_inv])
-        else:
+        # Fallback: if no pre-built search images, use raw grayscale
+        if search_images is None:
             search_images = [image_gray]
-        
-        # Multi-scale: limit scales based on context to improve speed
+
         if scales is None:
             scales = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]
-        
-        for _filename, tmpl_data in templates_dict.items():
+
+        results = []
+
+        for tmpl_data in templates_dict.values():
             label = tmpl_data['label']
-            tmpl_orig = tmpl_data['img']
-            
+            scaled_map = tmpl_data['scaled']
+
             for scale in scales:
-                if scale == 1.0:
-                    tmpl = tmpl_orig
-                else:
-                    tmpl = cv2.resize(tmpl_orig, None, fx=scale, fy=scale,
-                                      interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR)
-                
+                tmpl = scaled_map.get(scale)
+                if tmpl is None:
+                    continue  # Scale was filtered out (too small) at load time
+
                 th, tw = tmpl.shape[:2]
-                if th < 5 or tw < 5:
-                    continue
-                
+
                 for search_img in search_images:
-                    if th > search_img.shape[0] or tw > search_img.shape[1]:
+                    sh, sw = search_img.shape[:2]
+                    if th > sh or tw > sw:
                         continue
-                        
+
                     res = cv2.matchTemplate(search_img, tmpl, cv2.TM_CCOEFF_NORMED)
-                    loc = np.where(res >= threshold)
-                    
-                    for pt in zip(*loc[::-1]):
-                        score = float(res[pt[1], pt[0]])
-                        
-                        # Penalize generic/thin shapes that easily raise false positives (J, 7)
-                        if label in ['J', '7', '1', 'I']:
+                    locs = np.where(res >= threshold)
+
+                    for pt_x, pt_y in zip(locs[1], locs[0]):
+                        score = float(res[pt_y, pt_x])
+
+                        # Penalize generic/thin shapes that easily raise false positives
+                        if label in _PENALIZED_LABELS:
                             score -= 0.06
-                            
+
                         if score >= threshold:
                             results.append({
                                 'label': label, 'score': score,
-                                'x': pt[0], 'y': pt[1], 'w': tw, 'h': th
+                                'x': int(pt_x), 'y': int(pt_y),
+                                'w': tw, 'h': th,
                             })
-                
-        # NMS locally for this category
+
         return self._nms(results, iou_threshold=0.2)
-        
+
     def _handle_failed_case(self, board_img, paired_cards, ranks, suits, context, is_reliable):
+        """Save debug data when detection confidence is low."""
         if is_reliable:
             return
-            
         # Avoid saving completely empty regions unless it's the board
-        if len(ranks) == 0 and len(suits) == 0 and context != "board":
+        if not ranks and not suits and context != "board":
             return
-            
-        failed_dir = os.path.join(os.path.dirname(self.templates_dir), "templates_failed", "raw")
-        os.makedirs(failed_dir, exist_ok=True)
-        
+
+        if not self._failed_dir_created:
+            os.makedirs(self._failed_dir, exist_ok=True)
+            self._failed_dir_created = True
+
         ts = int(time.time() * 1000)
-        file_prefix = f"{ts}_{context}_failed"
-        
-        # 1. Save Crop
-        img_path = os.path.join(failed_dir, f"{file_prefix}.png")
+        prefix = f"{ts}_{context}_failed"
+
+        # Save crop
+        img_path = os.path.join(self._failed_dir, f"{prefix}.png")
         cv2.imwrite(img_path, board_img)
-        
-        # 2. Save Metadata
-        import json
-        meta_path = os.path.join(failed_dir, f"{file_prefix}.json")
+
+        # Save metadata
+        meta_path = os.path.join(self._failed_dir, f"{prefix}.json")
         try:
             with open(meta_path, "w") as f:
                 json.dump({
@@ -362,86 +489,141 @@ class CardDetector:
                     "context": context,
                     "ranks_found": len(ranks),
                     "suits_found": len(suits),
-                    "paired": [c['name'] for c in paired_cards]
+                    "paired": [c['name'] for c in paired_cards],
                 }, f)
         except Exception as e:
             logger.error(f"[FailedCaseManager] Error writing meta: {e}")
-            
+
         logger.warning(f"[FailedCaseManager] Triggered! Context='{context}'. Saved region to {img_path}")
 
     def _group_symbols(self, ranks, suits, context="board"):
+        """Pair each rank detection with its nearest suit detection below it."""
         paired_cards = []
         used_suits = set()
-        
+
+        cfg = _CONTEXT_CONFIG.get(context, _CONTEXT_CONFIG["_default"])
+        max_dx = cfg["max_dx"]
+        max_dy = cfg["max_dy"]
+
         # Sort ranks left-to-right
         ranks.sort(key=lambda x: x['x'])
-        
+
         for r in ranks:
-            r_cx = r['x'] + r['w'] / 2.0
-            r_cy = r['y'] + r['h'] / 2.0
-            
-            best_suit = None
-            best_match_val = -999  # Combined score - dist penalty
-            
+            r_cx = r['x'] + r['w'] * 0.5
+            r_cy = r['y'] + r['h'] * 0.5
+
+            best_suit_idx = None
+            best_match_val = -999.0
+
             for s_idx, s in enumerate(suits):
                 if s_idx in used_suits:
                     continue
-                s_cx = s['x'] + s['w'] / 2.0
-                s_cy = s['y'] + s['h'] / 2.0
-                
+
+                s_cx = s['x'] + s['w'] * 0.5
+                s_cy = s['y'] + s['h'] * 0.5
+
                 dx = abs(r_cx - s_cx)
                 dy = s_cy - r_cy  # Suit should be BELOW rank
-                
-                # Context-specific bounds
-                max_dx = 80 if context == "board" else 40
-                max_dy = 120 if context == "board" else 70
-                
-                # Heuristic bounds: Rank is above Suit, horizontally close
+
                 if dx < max_dx and 0 < dy < max_dy:
                     # Score drops by 0.1 for every 10 pixels of horizontal drift
                     penalty = (dx / 10.0) * 0.1
                     match_val = s['score'] - penalty
                     if match_val > best_match_val:
                         best_match_val = match_val
-                        best_suit = s_idx
-            
-            if best_suit is not None:
-                s = suits[best_suit]
-                used_suits.add(best_suit)
-                logger.debug(f"  Paired rank {r['label']}@({r['x']},{r['y']}) with {s['label']}@({s['x']},{s['y']}) score={s['score']:.2f}")
-                
+                        best_suit_idx = s_idx
+
+            if best_suit_idx is not None:
+                s = suits[best_suit_idx]
+                used_suits.add(best_suit_idx)
+                logger.debug(
+                    f"  Paired rank {r['label']}@({r['x']},{r['y']}) "
+                    f"with {s['label']}@({s['x']},{s['y']}) score={s['score']:.2f}"
+                )
+
                 min_x = min(r['x'], s['x'])
                 min_y = min(r['y'], s['y'])
-                max_r = max(r['x']+r['w'], s['x']+s['w'])
-                max_b = max(r['y']+r['h'], s['y']+s['h'])
-                
+                max_r = max(r['x'] + r['w'], s['x'] + s['w'])
+                max_b = max(r['y'] + r['h'], s['y'] + s['h'])
+                cx = int((min_x + max_r) / 2)
+                cy = int((min_y + max_b) / 2)
+
                 paired_cards.append({
                     'name': f"{r['label']}{s['label']}",
-                    'confidence': (r['score'] + s['score']) / 2.0,
+                    'confidence': (r['score'] + s['score']) * 0.5,
                     'x': min_x, 'y': min_y,
                     'w': max_r - min_x, 'h': max_b - min_y,
-                    'center': (int((min_x + max_r)/2), int((min_y + max_b)/2)),
+                    'center': (cx, cy),
                     'is_new': False,
                     'row': 0,
-                    'rect': [min_x, min_y, max_r - min_x, max_b - min_y]
+                    'rect': [min_x, min_y, max_r - min_x, max_b - min_y],
                 })
             else:
                 # No suit found — emit rank with unknown suit
                 logger.debug(f"  Unpaired rank {r['label']}@({r['x']},{r['y']}) — no suit nearby")
                 paired_cards.append({
                     'name': f"{r['label']}?",
-                    'confidence': r['score'] * 0.5,  # Lower confidence for partial match
+                    'confidence': r['score'] * 0.5,
                     'x': r['x'], 'y': r['y'],
                     'w': r['w'], 'h': r['h'],
-                    'center': (int(r['x'] + r['w']/2), int(r['y'] + r['h']/2)),
+                    'center': (int(r['x'] + r['w'] * 0.5), int(r['y'] + r['h'] * 0.5)),
                     'is_new': False,
                     'row': 0,
-                    'rect': [r['x'], r['y'], r['w'], r['h']]
+                    'rect': [r['x'], r['y'], r['w'], r['h']],
                 })
-        
+
         return paired_cards
 
-    def detect_cards_with_info(self, board_img, game_phase=None, min_group_size=2, context="board", save_debug_image=True):
+    def _filter_suits_by_color(self, suits, board_img):
+        """Drop suit detections where template color (red/black) contradicts actual pixel color."""
+        filtered = []
+
+        for s in suits:
+            x, y, w, h = s['x'], s['y'], s['w'], s['h']
+            roi = board_img[y:y + h, x:x + w]
+
+            if roi.size > 0:
+                # Sample the center of the bounding box (templates are symmetrically centered)
+                cy, cx = h // 2, w // 2
+                patch_size = max(1, min(3, h // 4, w // 4))
+
+                py1 = max(0, cy - patch_size)
+                py2 = min(h, cy + patch_size + 1)
+                px1 = max(0, cx - patch_size)
+                px2 = min(w, cx + patch_size + 1)
+                patch = roi[py1:py2, px1:px2]
+
+                if patch.size > 0:
+                    b, g, r = cv2.mean(patch)[:3]
+                else:
+                    b, g, r = (float(v) for v in roi[cy, cx])
+
+                min_ch = min(r, g, b)
+                max_ch = max(r, g, b)
+                is_white = min_ch > 180 and (max_ch - min_ch) < 40
+
+                if not is_white:
+                    is_red_actual = r > b + 25 and r > g + 25 and r > 80
+                    is_red_tmpl = 'heart' in s['label'] or 'diamond' in s['label']
+
+                    if is_red_tmpl != is_red_actual:
+                        logger.debug(
+                            f"  Suit {s['label']} REJECTED for color mismatch "
+                            f"(R={r:.0f}, G={g:.0f}, B={b:.0f})"
+                        )
+                        continue
+                else:
+                    logger.debug(
+                        f"  Suit {s['label']} SKIPPED color check — white pixel "
+                        f"(R={r:.0f}, G={g:.0f}, B={b:.0f})"
+                    )
+
+            filtered.append(s)
+
+        return filtered
+
+    def detect_cards_with_info(self, board_img, game_phase=None, min_group_size=2,
+                              context="board", save_debug_image=True):
         """
         Main entry point for finding cards in an ROI using Symbol-Based Template Mapping.
         """
@@ -449,132 +631,115 @@ class CardDetector:
             return {"cards": [], "is_reliable": False, "metrics": {}}
 
         gray = cv2.cvtColor(board_img, cv2.COLOR_BGR2GRAY)
-        
-        # Use targeted scales per context to optimize speed
-        if context == "board":
-            rank_scales = [1.0, 1.1] # Board cards are large (full size)
+        is_board = context == "board"
+
+        # Pre-compute binarized search images ONCE per frame
+        # (previously recomputed inside every _detect_symbols call)
+        search_images = self._build_search_images(gray, board_img)
+
+        # Context-specific parameters
+        if is_board:
+            cfg = _CONTEXT_CONFIG["board"]
             suit_tmpls = self.suit_templates_board
-            suit_scales = [1.0, 1.1]
-            suit_threshold = 0.80
-            rank_threshold = 0.75
+            suit_scales = cfg["suit_scales"]
         else:
-            # River/Action column showdown cards are smaller
-            rank_scales = [0.5, 0.6] 
-            suit_tmpls = self.suit_templates_small if self.suit_templates_small else self.suit_templates_board
-            # Scale tolerance for small templates
-            suit_scales = [0.9, 1.0, 1.1] if self.suit_templates_small else [0.5, 0.6]
-            suit_threshold = 0.70
-            rank_threshold = 0.70
+            cfg = _CONTEXT_CONFIG["_default"]
+            if self.suit_templates_small:
+                suit_tmpls = self.suit_templates_small
+                suit_scales = cfg["suit_scales_small"]
+            else:
+                suit_tmpls = self.suit_templates_board
+                suit_scales = cfg["suit_scales_board_fallback"]
 
-        ranks = self._detect_symbols(gray, self.rank_templates, threshold=rank_threshold, binarize=True, scales=rank_scales)
-        # CRITICAL: pass color_image so red-channel binarization catches red suits on dark backgrounds
-        suits = self._detect_symbols(gray, suit_tmpls, threshold=suit_threshold, binarize=True, scales=suit_scales, color_image=board_img)
-        
-        # For river/small context: also try board templates at reduced scales as fallback.
-        # Small templates (black-on-white) may not match red suits on dark backgrounds even with
-        # red_binary_inv, but board templates (white-on-black) match well against red_binary
-        # (white suit from R-channel isolation on black background).
-        if context != "board" and self.suit_templates_board:
-            fallback_scales = [0.4, 0.5, 0.6, 0.7]
-            suits_fallback = self._detect_symbols(gray, self.suit_templates_board, threshold=suit_threshold, binarize=True, scales=fallback_scales, color_image=board_img)
+        rank_threshold = cfg["rank_threshold"]
+        suit_threshold = cfg["suit_threshold"]
+
+        # Detect ranks and suits (reuse pre-built search images)
+        ranks = self._detect_symbols(
+            gray, self.rank_templates,
+            threshold=rank_threshold, scales=cfg["rank_scales"],
+            search_images=search_images,
+        )
+        suits = self._detect_symbols(
+            gray, suit_tmpls,
+            threshold=suit_threshold, scales=suit_scales,
+            search_images=search_images,
+        )
+
+        # For river/small context: also try board templates at reduced scales as fallback
+        if not is_board and self.suit_templates_board:
+            suits_fallback = self._detect_symbols(
+                gray, self.suit_templates_board,
+                threshold=suit_threshold,
+                scales=cfg["fallback_scales"],
+                search_images=search_images,
+            )
             if suits_fallback:
-                logger.debug(f"[CardDetector] river fallback: {len(suits_fallback)} extra suit hits from board templates")
-                # Merge and deduplicate via NMS
+                logger.debug(
+                    f"[CardDetector] river fallback: {len(suits_fallback)} extra suit hits "
+                    f"from board templates"
+                )
                 suits = self._nms(suits + suits_fallback, iou_threshold=0.2)
-        
-        # Apply Color Check Penalty to Suits (Red vs Black)
-        filtered_suits = []
-        for s in suits:
-            label = s['label']
-            x, y, w, h = s['x'], s['y'], s['w'], s['h']
-            roi = board_img[y:y+h, x:x+w]
-            
-            if roi.size > 0:
-                # Since auto-generated templates are perfectly symmetrically centered around the symbol,
-                # we can confidently sample the very center of the bounding box to test color,
-                # Since templates generated via contour cropping are symmetrically centered,
-                # we can confidently sample the very center of the bounding box to test color,
-                # completely avoiding any dark table edges!
-                cy, cx = h // 2, w // 2
-                patch_size = max(1, min(3, h // 4, w // 4)) 
-                
-                py1, py2 = max(0, cy - patch_size), min(h, cy + patch_size + 1)
-                px1, px2 = max(0, cx - patch_size), min(w, cx + patch_size + 1)
-                patch = roi[py1:py2, px1:px2]
-                
-                if patch.size > 0:
-                    b, g, r = cv2.mean(patch)[:3]
-                else:
-                    b, g, r = [float(v) for v in roi[cy, cx]]
-                
-                # If the sampled pixel is white/near-white, the suit symbol itself
-                # is rendered in white (e.g. on blue card backgrounds). Color is
-                # ambiguous in this case — trust the template shape match instead.
-                min_ch = min(r, g, b)
-                max_ch = max(r, g, b)
-                is_white = min_ch > 180 and (max_ch - min_ch) < 40
-                
-                if not is_white:
-                    # Red suits have a dominant R channel
-                    is_red_actual = r > b + 25 and r > g + 25 and r > 80
-                    is_red_tmpl = 'heart' in label or 'diamond' in label
-                    
-                    if is_red_tmpl != is_red_actual:
-                        logger.debug(f"  Suit {label} REJECTED for color mismatch (R={r:.0f}, G={g:.0f}, B={b:.0f})")
-                        continue  # Drop entirely if color is fundamentally wrong
-                else:
-                    logger.debug(f"  Suit {label} SKIPPED color check — white pixel (R={r:.0f}, G={g:.0f}, B={b:.0f})")
-                    
-            filtered_suits.append(s)
 
-        
-        suits = filtered_suits
-        
+        # Apply color-based suit filtering
+        suits = self._filter_suits_by_color(suits, board_img)
+
         logger.debug(f"[CardDetector] {context}: {len(ranks)} rank hits, {len(suits)} suit hits")
         for r in ranks:
             logger.debug(f"  rank: {r['label']} score={r['score']:.2f} at ({r['x']},{r['y']})")
         for s in suits:
             logger.debug(f"  suit: {s['label']} score={s['score']:.2f} at ({s['x']},{s['y']})")
-        
-        if save_debug_image and (len(ranks) > 0 or len(suits) > 0):
+
+        # Save debug visualization — only copy image when actually needed
+        if save_debug_image and (ranks or suits):
             debug_img = board_img.copy()
-            for s in ranks:
-                cv2.rectangle(debug_img, (s['x'], s['y']), (s['x']+s['w'], s['y']+s['h']), (0, 255, 0), 1)
-                cv2.putText(debug_img, f"{s['label']} {s['score']:.2f}", (s['x'], s['y']-2), 
+            for d in ranks:
+                cv2.rectangle(debug_img, (d['x'], d['y']),
+                              (d['x'] + d['w'], d['y'] + d['h']), (0, 255, 0), 1)
+                cv2.putText(debug_img, f"{d['label']} {d['score']:.2f}",
+                            (d['x'], d['y'] - 2),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
-            for s in suits:
-                cv2.rectangle(debug_img, (s['x'], s['y']), (s['x']+s['w'], s['y']+s['h']), (255, 0, 0), 1)
-                cv2.putText(debug_img, f"{s['label']} {s['score']:.2f}", (s['x'], s['y']-2), 
+            for d in suits:
+                cv2.rectangle(debug_img, (d['x'], d['y']),
+                              (d['x'] + d['w'], d['y'] + d['h']), (255, 0, 0), 1)
+                cv2.putText(debug_img, f"{d['label']} {d['score']:.2f}",
+                            (d['x'], d['y'] - 2),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
             self._save_debug(debug_img, f"symbols_matched_{context}")
 
-        # Grouping Logic
+        # Grouping & sorting
         paired_cards = self._group_symbols(ranks, suits, context=context)
-        
-        # Sorting Logic
-        if context == "board":
-            paired_cards.sort(key=lambda c: c['x']) # Left to right
+
+        if is_board:
+            paired_cards.sort(key=lambda c: c['x'])   # Left to right
         else:
-            paired_cards.sort(key=lambda c: c['y']) # Top to bottom
-            
+            paired_cards.sort(key=lambda c: c['y'])   # Top to bottom
+
         names = [c['name'] for c in paired_cards]
         is_duplicate = len(names) != len(set(names))
-        is_reliable = (3 <= len(paired_cards) <= 5) and not is_duplicate if context == "board" else ((len(paired_cards) > 0) and not is_duplicate)
+
+        if is_board:
+            is_reliable = 3 <= len(paired_cards) <= 5 and not is_duplicate
+        else:
+            is_reliable = len(paired_cards) > 0 and not is_duplicate
 
         # Trigger Failed Case Logging
         self._handle_failed_case(board_img, paired_cards, ranks, suits, context, is_reliable)
 
+        num_cards = len(paired_cards)
         return {
             "cards": paired_cards,
             "is_reliable": is_reliable,
             "metrics": {
-                "card_count": len(paired_cards),
+                "card_count": num_cards,
                 "has_unknown": False,
-                "avg_confidence": sum(c['confidence'] for c in paired_cards) / max(1, len(paired_cards)),
+                "avg_confidence": (
+                    sum(c['confidence'] for c in paired_cards) / num_cards
+                    if num_cards else 0.0
+                ),
                 "is_duplicate": is_duplicate,
                 "rows_found": 1,
                 "ranks_found": len(ranks),
-                "suits_found": len(suits)
-            }
+                "suits_found": len(suits),
+            },
         }
-

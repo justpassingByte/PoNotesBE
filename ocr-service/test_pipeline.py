@@ -204,31 +204,11 @@ def test_pipeline(img_path="ocrtestMain.png"):
     if action_crop is not None:
         print(f"  Crop size: {action_crop.shape[1]}x{action_crop.shape[0]}")
         
-        # Get river cards for matching (template-only, context='river')
-        river_region = layout['regions'].get('river_column')
-        river_col_crop = engine.crop_region(img, river_region) if river_region else None
-        
-        # Save the base river and action crops for layout debugging
+        # Save action crop for layout debugging
         cv2.imwrite("debug_crops/layout_action_crop.png", action_crop)
         print(f"  → Dumped layout crop: debug_crops/layout_action_crop.png")
-        if river_col_crop is not None:
-            cv2.imwrite("debug_crops/layout_river_crop.png", river_col_crop)
-            print(f"  → Dumped layout crop: debug_crops/layout_river_crop.png")
-        river_data = detector.detect_cards_with_info(
-            river_col_crop, context="river"
-        ) if river_col_crop is not None else {"cards": []}
-        river_cards = [c['name'] for c in river_data['cards']]
         
-        # Debug dump for river cards (detected within action crop)
-        unknown_river = [(i, c) for i, c in enumerate(river_data['cards']) if c['name'] == '??']
-        if unknown_river:
-            print(f"\n  ⚠ {len(unknown_river)} unknown RIVER card(s) — saving debug crops...")
-            for ui_idx, (orig_idx, card_data) in enumerate(unknown_river):
-                if card_data.get('image') is not None:
-                    debug_path = f"debug_river_card_{ui_idx}.png"
-                    cv2.imwrite(debug_path, card_data['image'])
-                    print(f"    → Saved {debug_path} (rect={card_data['rect']})")
-        
+        # River card detection happens inside action_parser.parse() — no need to run it separately
         parsed = action_parser.parse(
             action_crop,
             action_ocr,
