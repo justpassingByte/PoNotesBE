@@ -21,6 +21,7 @@ import dashboardRoutes from './routes/dashboardRoutes';
 import { adminRoutes } from './routes/adminRoutes';
 import usageRoutes from './routes/usageRoutes';
 import { ocrRoutes } from './routes/ocrRoutes';
+import { userRoutes } from './routes/userRoutes';
 import cookieParser from 'cookie-parser';
 import { authMiddleware } from './middleware/authMiddleware';
 
@@ -93,6 +94,7 @@ app.use('/api/players/:playerId/profile', playerProfileRoutes);
 app.use('/api/players/:playerId/exploit', exploitRoutes);
 app.use('/api/players/:playerId/stats', playerStatsRoutes);
 
+app.use('/api/users', userRoutes);
 app.use('/api/players', playerRoutes);
 app.use('/api/notes', noteRoutes);
 app.use('/api/templates', templateRoutes);

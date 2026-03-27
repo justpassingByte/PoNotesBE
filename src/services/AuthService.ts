@@ -103,7 +103,7 @@ export class AuthService {
         // Sign JWT
         const token = this.generateToken(user, session);
 
-        return { token, user: { id: user.id, email: user.email, tier: user.premium_tier } };
+        return { token, user: { id: user.id, email: user.email, tier: user.premium_tier, language: user.language } };
     }
 
     /**
@@ -150,7 +150,7 @@ export class AuthService {
         if (!session) throw new Error('Session not found');
 
         const token = this.generateToken(session.user, session);
-        return { token, user: { id: session.user.id, email: session.user.email, tier: session.user.premium_tier } };
+        return { token, user: { id: session.user.id, email: session.user.email, tier: session.user.premium_tier, language: session.user.language } };
     }
 
     /**

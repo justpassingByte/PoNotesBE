@@ -71,7 +71,7 @@ async def extract_hand_data(file: UploadFile = File(...)):
 @app.post("/ocr/sync")
 async def extract_hand_data_sync(file: UploadFile = File(...)):
     """
-    Synchronous OCR — runs task in-process, returns result directly.
+    Synchronous OCR — runs task in threadpool, returns result directly.
     Passes raw bytes (skips hex/base64 encode+decode entirely).
     """
     if not file:
@@ -82,7 +82,9 @@ async def extract_hand_data_sync(file: UploadFile = File(...)):
 
     try:
         from tasks import process_hand_bytes
-        result = process_hand_bytes(image_bytes, image_hash)
+        from fastapi.concurrency import run_in_threadpool
+        # Run heavy CPU tasks in a threadpool so the main event loop doesn't block and crash the socket
+        result = await run_in_threadpool(process_hand_bytes, image_bytes, image_hash)
         return {"status": "success", "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

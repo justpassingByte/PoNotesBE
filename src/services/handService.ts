@@ -423,7 +423,11 @@ export class HandService {
             formData.append('file', blob, `hand.${mimeType.split('/')[1] || 'png'}`);
 
             // Try synchronous endpoint first (eliminates polling overhead)
-            const response = await fetch(`${ocrServiceUrl}/ocr/sync`, { method: 'POST', body: formData });
+            const response = await fetch(`${ocrServiceUrl}/ocr/sync`, { 
+                method: 'POST', 
+                body: formData,
+                headers: { 'Connection': 'close' } // Fix UND_ERR_SOCKET keep-alive reuse bug
+            });
 
             if (response.ok) {
                 const data = await response.json();
@@ -436,14 +440,20 @@ export class HandService {
 
             // Fallback: queue + poll (if /ocr/sync not available)
             console.log('[OCR_ENGINE] Sync endpoint unavailable, falling back to queue+poll...');
-            const queueResponse = await fetch(`${ocrServiceUrl}/ocr`, { method: 'POST', body: formData });
+            const queueResponse = await fetch(`${ocrServiceUrl}/ocr`, { 
+                method: 'POST', 
+                body: formData,
+                headers: { 'Connection': 'close' } 
+            });
             if (!queueResponse.ok) throw new Error(`OCR Service Error: ${queueResponse.status}`);
 
             const { job_id } = await queueResponse.json();
             console.log(`[OCR_ENGINE] Sent visual payload. Job ID: ${job_id}. Waiting for core...`);
 
             for (let i = 0; i < 30; i++) {
-                const poll = await fetch(`${ocrServiceUrl}/result/${job_id}`);
+                const poll = await fetch(`${ocrServiceUrl}/result/${job_id}`, {
+                    headers: { 'Connection': 'close' }
+                });
                 const data = await poll.json();
                 if (data.status === 'success') {
                     console.log(`[OCR_ENGINE] Scan Complete (Job: ${job_id}). Confidence: ${data.result.confidence?.total || 0}%. Payload extracted!`);
@@ -471,6 +481,7 @@ export class HandService {
     private async runAnalysis(parsedData: ParsedHand | null, tier: PremiumTier, userId?: string): Promise<HandAnalysis> {
         const groqKey = process.env.GROQ_API_KEY;
         const aiConfig = userId ? await prisma.userAIConfig.findUnique({ where: { user_id: userId } }) : null;
+        const userSettings = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { language: true } }) : null;
 
         // NEW: Fetch deep player context to enable TARGETED EXPLOITS in hand analysis
         let playerContext = "";
@@ -509,7 +520,8 @@ export class HandService {
             baseURL: isChatGPT ? undefined : 'https://api.groq.com/openai/v1'
         });
 
-        const prompt = buildHandAnalysisPrompt(aiConfig?.analysis_prompt || undefined, aiConfig as any, playerContext);
+        const promptSettings = { ...(aiConfig || {}), language: userSettings?.language };
+        const prompt = buildHandAnalysisPrompt(aiConfig?.analysis_prompt || undefined, promptSettings as any, playerContext);
         const response = await client.chat.completions.create({
             messages: [
                 { role: 'system', content: prompt },

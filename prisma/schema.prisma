@@ -48,6 +48,7 @@ model User {
   is_admin            Boolean     @default(false)
   subscription_expiry DateTime?
   max_devices         Int         @default(2)
+  language            String      @default("en") // "en" | "vi"
   created_at          DateTime    @default(now())
 
   sessions    Session[]

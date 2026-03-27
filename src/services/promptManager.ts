@@ -48,6 +48,7 @@ export function buildHandAnalysisPrompt(
     hand_aggression_bias?: number;
     hand_insight_depth?: string;
     hand_behavior_toggles?: any;
+    language?: string;
   },
   playerContext?: string
 ): string {
@@ -113,6 +114,7 @@ ${style === 'Exploit' ? `You are in EXPLOIT mode.
 2. ALL PLAYERS EQUAL: Analyze mistakes and leaks for EVERY player equally. Do NOT distinguish between "Hero" and "Villain". Report each player by their actual username.
 3. EXPLOIT_VALIDATION: exploit_suggestions MUST be actionable strategies to use against specific players' leaks found in this hand.
 4. SIZING_VALIDATION: Fold/Call actions must have sizing=null.
+5. LANGUAGE_VALIDATION: ${settings?.language === 'vi' ? 'Respond strictly in Vietnamese (vi), but retain standard Poker acronyms (BTN, XR, AQo, etc.) in English.' : 'Respond in English.'}
 `;
 
   const customBase = customPrompt ? `### USER-DEFINED INSTRUCTIONS:\n${customPrompt}\n` : "";
@@ -190,10 +192,9 @@ export function buildProfilePrompt(
     aggression_bias?: number;
     insight_depth?: string;
     behavior_toggles?: any;
+    language?: string;
   }
 ): string {
-  if (customPrompt && customPrompt.trim() !== '') return customPrompt;
-
   const style = settings?.ai_style || 'Exploit';
   const aggression = settings?.aggression_bias ?? 85;
   const depth = settings?.insight_depth || 'Deep';
@@ -281,6 +282,9 @@ Requirements:
 - NO repeated fields (e.g., do not output "frequency" twice in the same object).
 - NO partial objects or trailing commas.
 - If JSON is invalid → REWRITE entire response.
+
+### 8. LANGUAGE VALIDATION (MANDATORY)
+${settings?.language === 'vi' ? 'Respond strictly in Vietnamese (vi), but retain standard Poker acronyms (BTN, XR, AQo, etc.) in English.' : 'Respond in English.'}
 `;
 
   const schemaBlock = `
@@ -311,8 +315,10 @@ Requirements:
 \`\`\`
 Return JSON ONLY.`;
 
-  return `${configBlock}
+  const customBase = customPrompt ? `\n### USER-DEFINED OVERRIDE (CRITICAL):\n${customPrompt}\n` : "";
 
+  return `${configBlock}
+${customBase}
 ${schemaBlock}`;
 }
 

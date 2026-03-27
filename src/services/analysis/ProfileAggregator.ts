@@ -153,7 +153,7 @@ export class ProfileAggregator {
                 }),
                 prisma.player.findUnique({
                     where: { id: playerId },
-                    select: { user_id: true }
+                    select: { user_id: true, user: { select: { language: true } } }
                 })
             ]);
 
@@ -173,7 +173,8 @@ export class ProfileAggregator {
             });
 
             const rawContent = notes.map(n => n.content).join('; ');
-            const prompt = buildProfilePrompt(aiConfig?.system_prompt || undefined, aiConfig as any);
+            const promptSettings = { ...(aiConfig || {}), language: player.user?.language };
+            const prompt = buildProfilePrompt(aiConfig?.system_prompt || undefined, promptSettings as any);
             
             let inputText = `STRUCTURED TENDENCIES: ${JSON.stringify(structuredData, null, 2)}\n\nRAW CONTEXTUAL NOTES: ${rawContent}`;
             if (activePatterns && activePatterns.length > 0) {

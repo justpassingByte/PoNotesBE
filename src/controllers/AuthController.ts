@@ -166,6 +166,7 @@ export class AuthController {
                     id: user.id,
                     email: user.email,
                     premium_tier: user.premium_tier,
+                    language: user.language,
                     subscription_expiry: user.subscription_expiry ?? null,
                     created_at: user.created_at,
                     is_admin: user.is_admin ?? false,
