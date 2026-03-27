@@ -1,13 +1,21 @@
 import os
 import hashlib
+import base64
+import logging
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from celery_worker import celery_app
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 # Initialize API
 app = FastAPI(title="VillainVault OCR Service")
+
+# GZip responses > 500 bytes (saves bandwidth for JSON results)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,20 +51,41 @@ class FailedCaseLabelRequest(BaseModel):
 async def extract_hand_data(file: UploadFile = File(...)):
     """
     Receives image, queues it into Celery for processing.
+    Uses base64 instead of hex (33% overhead vs 100%).
     """
     if not file:
         raise HTTPException(status_code=400, detail="No file uploaded")
     
     image_bytes = await file.read()
     image_hash = hashlib.md5(image_bytes).hexdigest()
-    image_hex = image_bytes.hex()
+    image_b64 = base64.b64encode(image_bytes).decode('ascii')
     
     job = celery_app.send_task(
         "tasks.process_hand",
-        args=[image_hex, image_hash]
+        args=[image_b64, image_hash]
     )
     
     return {"status": "queued", "job_id": job.id}
+
+
+@app.post("/ocr/sync")
+async def extract_hand_data_sync(file: UploadFile = File(...)):
+    """
+    Synchronous OCR — runs task in-process, returns result directly.
+    Passes raw bytes (skips hex/base64 encode+decode entirely).
+    """
+    if not file:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+
+    image_bytes = await file.read()
+    image_hash = hashlib.md5(image_bytes).hexdigest()
+
+    try:
+        from tasks import process_hand_bytes
+        result = process_hand_bytes(image_bytes, image_hash)
+        return {"status": "success", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/result/{job_id}", response_model=JobResponse)

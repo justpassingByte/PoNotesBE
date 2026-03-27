@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 # Initialize Engine Singletons
 ocr = PaddleOCR(
     use_angle_cls=False, lang='ch', show_log=False,
-    use_gpu=False, enable_mkldnn=True, cpu_threads=4,
+    use_gpu=False, enable_mkldnn=True, cpu_threads=2,
+    ocr_version='PP-OCRv4',       # PP-OCRv4 mobile (faster inference, +4.5% accuracy)
+    det_db_thresh=0.3,             # slightly lower threshold for small poker text
 )
 layout_engine   = LayoutEngine(config_path="layout_config.json")
 card_detector   = CardDetector(templates_dir="templates")
@@ -52,26 +54,32 @@ def detect_game_phase(board_cards: list) -> str:
 
 # ─── Main Celery Task ──────────────────────────────────────────────────────────
 
-@celery_app.task(name="tasks.process_hand")
-def process_hand(image_hex: str, image_hash: str):
+# ─── OCR Warm-up ───────────────────────────────────────────────────────────────
+# Eliminate cold-start penalty: first PaddleOCR call loads model weights (~2-3s).
+# Do it now at module import so the first real request is fast.
+
+def _warmup():
+    try:
+        dummy = np.zeros((100, 100, 3), dtype=np.uint8)
+        ocr.ocr(dummy, cls=False)
+        logger.info("[tasks] OCR warm-up complete")
+    except Exception as e:
+        logger.warning(f"[tasks] OCR warm-up failed (non-fatal): {e}")
+
+_warmup()
+
+
+# ─── Core pipeline (accepts raw bytes) ─────────────────────────────────────────
+
+def process_hand_bytes(img_bytes: bytes, image_hash: str):
     """
-    Main OCR processing task with hybrid validation pipeline.
-    Returns structured hand data + confidence breakdown.
+    Core OCR pipeline. Accepts raw image bytes directly (no encoding overhead).
+    Called by /ocr/sync endpoint and internally by the Celery task.
     """
-    # Smart reload: only re-read templates when files on disk have actually changed
     card_detector.reload_if_changed()
-    
+
     start_time = time.time()
     try:
-        # 1. Decode Image (Handle both Hex and Base64/DataURL)
-        if "," in image_hex: # Handle Data URL
-            image_hex = image_hex.split(",")[1]
-            
-        try:
-            img_bytes = bytes.fromhex(image_hex)
-        except ValueError:
-            img_bytes = base64.b64decode(image_hex)
-            
         nparr = np.frombuffer(img_bytes, np.uint8)
         img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
@@ -368,6 +376,26 @@ def process_hand(image_hex: str, image_hash: str):
     except Exception as e:
         logger.error(f"[tasks] Task failed: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
+
+# ─── Celery Task Wrapper ───────────────────────────────────────────────────────
+
+@celery_app.task(name="tasks.process_hand")
+def process_hand(image_data: str, image_hash: str):
+    """
+    Celery-compatible wrapper. Accepts base64 or hex encoded image data,
+    decodes to bytes, then delegates to process_hand_bytes().
+    """
+    # Handle Data URL prefix
+    if "," in image_data:
+        image_data = image_data.split(",")[1]
+
+    # Decode: try base64 first (more efficient), fall back to hex
+    try:
+        img_bytes = base64.b64decode(image_data)
+    except Exception:
+        img_bytes = bytes.fromhex(image_data)
+
+    return process_hand_bytes(img_bytes, image_hash)
 
 
 # ─── Feedback Endpoint Task (Phase 4) ──────────────────────────────────────────

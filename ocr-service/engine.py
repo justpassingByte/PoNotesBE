@@ -429,6 +429,7 @@ class CardDetector:
         for tmpl_data in templates_dict.values():
             label = tmpl_data['label']
             scaled_map = tmpl_data['scaled']
+            best_score_for_tmpl = 0.0  # Track best score across scales
 
             for scale in scales:
                 tmpl = scaled_map.get(scale)
@@ -458,6 +459,13 @@ class CardDetector:
                                 'x': int(pt_x), 'y': int(pt_y),
                                 'w': tw, 'h': th,
                             })
+                            if score > best_score_for_tmpl:
+                                best_score_for_tmpl = score
+
+                # Early exit: if this template already matched at very high confidence,
+                # skip remaining scales — the match is definitive.
+                if best_score_for_tmpl > 0.88:
+                    break
 
         return self._nms(results, iou_threshold=0.2)
 
@@ -634,8 +642,9 @@ class CardDetector:
         is_board = context == "board"
 
         # Pre-compute binarized search images ONCE per frame
-        # (previously recomputed inside every _detect_symbols call)
         search_images = self._build_search_images(gray, board_img)
+        # Edge-only image for fast first pass (just raw grayscale)
+        edge_only = [gray]
 
         # Context-specific parameters
         if is_board:
@@ -654,20 +663,57 @@ class CardDetector:
         rank_threshold = cfg["rank_threshold"]
         suit_threshold = cfg["suit_threshold"]
 
-        # Detect ranks and suits (reuse pre-built search images)
-        ranks = self._detect_symbols(
-            gray, self.rank_templates,
-            threshold=rank_threshold, scales=cfg["rank_scales"],
-            search_images=search_images,
-        )
+        # ── Detection strategy depends on context ──
+        # Board: large, well-lit cards → edge-only first pass is safe & fast.
+        # River/small: tiny cards on dark backgrounds → grayscale alone produces
+        # false-positive ranks. Always use all binarized images for accuracy.
+        if is_board:
+            # Phase 1: Edge-only pass for ranks (fast — 1 search image)
+            ranks = self._detect_symbols(
+                gray, self.rank_templates,
+                threshold=rank_threshold, scales=cfg["rank_scales"],
+                search_images=edge_only,
+            )
+
+            # Phase 2: Selective binarize fallback for RANKS if edge missed some
+            edge_rank_count = len(ranks)
+            if edge_rank_count < 3:
+                found_rank_labels = {r['label'] for r in ranks}
+                missing_rank_templates = {
+                    k: v for k, v in self.rank_templates.items()
+                    if v['label'] not in found_rank_labels
+                }
+                if missing_rank_templates:
+                    ranks_extra = self._detect_symbols(
+                        gray, missing_rank_templates,
+                        threshold=rank_threshold, scales=cfg["rank_scales"],
+                        search_images=search_images,
+                    )
+                    if ranks_extra:
+                        ranks = self._nms(ranks + ranks_extra, iou_threshold=0.2)
+                    logger.debug(
+                        f"[CardDetector] board: rank binarize fallback ran "
+                        f"({len(missing_rank_templates)} missing rank templates)"
+                    )
+        else:
+            # Non-board: use all search images for ranks (small cards need binarization)
+            ranks = self._detect_symbols(
+                gray, self.rank_templates,
+                threshold=rank_threshold, scales=cfg["rank_scales"],
+                search_images=search_images,
+            )
+
+        # Suits ALWAYS use all search images — red suits (hearts/diamonds)
+        # need the red-channel binarized image, invisible in plain grayscale.
         suits = self._detect_symbols(
             gray, suit_tmpls,
             threshold=suit_threshold, scales=suit_scales,
             search_images=search_images,
         )
 
-        # For river/small context: also try board templates at reduced scales as fallback
-        if not is_board and self.suit_templates_board:
+        # ── Phase 3: River board-template fallback ──
+        # Only run if edge+binarize still didn't find enough suits
+        if not is_board and self.suit_templates_board and len(suits) < 2:
             suits_fallback = self._detect_symbols(
                 gray, self.suit_templates_board,
                 threshold=suit_threshold,

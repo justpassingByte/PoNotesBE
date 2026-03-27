@@ -422,10 +422,24 @@ export class HandService {
             const blob = new Blob([new Uint8Array(imageBuffer)], { type: mimeType });
             formData.append('file', blob, `hand.${mimeType.split('/')[1] || 'png'}`);
 
-            const response = await fetch(`${ocrServiceUrl}/ocr`, { method: 'POST', body: formData });
-            if (!response.ok) throw new Error(`OCR Service Error: ${response.status}`);
+            // Try synchronous endpoint first (eliminates polling overhead)
+            const response = await fetch(`${ocrServiceUrl}/ocr/sync`, { method: 'POST', body: formData });
 
-            const { job_id } = await response.json();
+            if (response.ok) {
+                const data = await response.json();
+                if (data.status === 'success') {
+                    console.log(`[OCR_ENGINE] Sync scan complete. Confidence: ${data.result.confidence?.total || 0}%. Payload extracted!`);
+                    return data.result;
+                }
+                throw new Error(data.detail || 'OCR sync failed');
+            }
+
+            // Fallback: queue + poll (if /ocr/sync not available)
+            console.log('[OCR_ENGINE] Sync endpoint unavailable, falling back to queue+poll...');
+            const queueResponse = await fetch(`${ocrServiceUrl}/ocr`, { method: 'POST', body: formData });
+            if (!queueResponse.ok) throw new Error(`OCR Service Error: ${queueResponse.status}`);
+
+            const { job_id } = await queueResponse.json();
             console.log(`[OCR_ENGINE] Sent visual payload. Job ID: ${job_id}. Waiting for core...`);
 
             for (let i = 0; i < 30; i++) {
@@ -436,7 +450,7 @@ export class HandService {
                     return data.result;
                 }
                 if (data.status === 'error') throw new Error(data.detail);
-                await new Promise(r => setTimeout(r, 1000));
+                await new Promise(r => setTimeout(r, 300));
             }
             throw new Error('OCR Timeout');
         } catch (error) {

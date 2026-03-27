@@ -21,10 +21,11 @@ RUN mkdir -p /root/.paddleocr /app/logs
 
 COPY . .
 
-# Set environment variables for better CPU performance
-ENV PADDLE_NUM_THREADS=4
-ENV OMP_NUM_THREADS=4
-ENV MKL_NUM_THREADS=4
+# Set environment variables for CPU performance (docker-compose overrides these)
+ENV PADDLE_NUM_THREADS=2
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
 ENV FLAGS_use_mkldnn=1
 
 # Default command (overridden in docker-compose for worker)
