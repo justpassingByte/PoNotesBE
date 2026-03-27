@@ -22,8 +22,10 @@ RUN mkdir -p /root/.paddleocr /app/logs
 COPY . .
 
 # Set environment variables for better CPU performance
-ENV PADDLE_NUM_THREADS=2
-ENV OMP_NUM_THREADS=2
+ENV PADDLE_NUM_THREADS=4
+ENV OMP_NUM_THREADS=4
+ENV MKL_NUM_THREADS=4
+ENV FLAGS_use_mkldnn=1
 
 # Default command (overridden in docker-compose for worker)
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

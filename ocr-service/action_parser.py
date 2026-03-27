@@ -83,6 +83,7 @@ _ACTION_NORMALIZE = {
     "check": "Check", "fold": "Fold", "call": "Call", "raise": "Raise", "bet": "Bet", "all-in": "All-In",
     "tất tay": "All-In", "tố tất": "All-In", "to tat": "All-In",
     "str": "Straddle", "straddle": "Straddle", "strade": "Straddle",
+    "bảo hiểm": "Insurance", "bao hiem": "Insurance", "insurance": "Insurance"
 }
 
 def normalize_action(text: str) -> str:
@@ -127,7 +128,7 @@ WINNER_KEYWORDS = ["winner", "thắng", "win", "won"]
 NOISE_KEYWORDS = [
     "winner", "pot", "total", "tổng", "tong",
     "pre-flop", "flop", "turn", "river", "trước flop", "truoc flop",
-    "bảo hiểm", "bao hiem", "tố tất", "to tat", "jp", "盲注", "翻牌前",
+    "tố tất", "to tat", "jp", "盲注", "翻牌前",
 ]
 
 
@@ -293,7 +294,7 @@ class ActionLogParser:
 
 
 
-                log_cards = card_detector.detect_cards_with_info(river_col_img, ocr_engine=ocr_engine, min_group_size=1, context="river")
+                log_cards = card_detector.detect_cards_with_info(river_col_img, min_group_size=1, context="river")
                 for idx, c in enumerate(log_cards.get('cards', [])):
                     rect = c.get('rect', [0,0,0,0])
                     cw, ch = rect[2], rect[3]
@@ -425,7 +426,7 @@ class ActionLogParser:
                         
                         current_entry = {
                             "player": pos_to_player[norm_pos], "pos": norm_pos,
-                            "action": "", "amount": "", "hand": [],
+                            "action": "", "sub_action": "", "amount": "", "hand": [],
                             "_y": item['y']
                         }
                     else:
@@ -459,7 +460,7 @@ class ActionLogParser:
                     if current_entry.get('player'):
                         streets_data[street_key].append(current_entry)
                     current_entry = {
-                        "player": line, "pos": "", "action": "", "amount": "", "hand": [],
+                        "player": line, "pos": "", "action": "", "sub_action": "", "amount": "", "hand": [],
                         "_y": item['y']
                     }
                 elif current_entry.get('player'):
@@ -470,21 +471,16 @@ class ActionLogParser:
                         current_entry['action'] = "WINNER"
                     elif is_action:
                         norm_act = normalize_action(line)
-                        # On PC, Straddle belongs to the current entry if possible
+                        # On PC, Straddle/All-In often appear right under the main action (e.g. Raise)
                         if not current_entry['action']:
                             current_entry['action'] = norm_act
                         else:
-                            # We already have an action. The player made a SECOND action.
-                            # Push the current entry and start a new one for the same player.
-                            streets_data[street_key].append(current_entry)
-                            current_entry = {
-                                "player": current_entry['player'],
-                                "pos": current_entry['pos'],
-                                "action": norm_act,
-                                "amount": "",
-                                "hand": [],
-                                "_y": item['y']
-                            }
+                            # We already have a main action. This must be a sub-action (like All-in or Insurance)
+                            # because no new player name/pos badge bounded it.
+                            if not current_entry.get('sub_action'):
+                                current_entry['sub_action'] = norm_act
+                            elif norm_act not in current_entry['sub_action']:
+                                current_entry['sub_action'] += f", {norm_act}"
 
                         # Match first sequence of digits
                         clean_for_amt = l_clean
@@ -510,6 +506,7 @@ class ActionLogParser:
                                     "player": current_entry['player'],
                                     "pos": current_entry['pos'],
                                     "action": "",
+                                    "sub_action": "",
                                     "amount": line,
                                     "hand": [],
                                     "_y": item['y']
@@ -769,6 +766,13 @@ class ActionLogParser:
                                     existing[field] = old_val + new_val
                                 elif is_signed_amount(new_val) and not is_signed_amount(old_val):
                                     existing[field] = new_val
+
+                        # Merge sub_action 
+                        if entry.get('sub_action'):
+                            if not existing.get('sub_action'):
+                                existing['sub_action'] = entry['sub_action']
+                            elif entry['sub_action'] not in existing['sub_action']:
+                                existing['sub_action'] += f", {entry['sub_action']}"
 
                         if entry.get('hand'):
                             existing['hand'] = list(set(existing.get('hand', []) + entry['hand']))[:2]

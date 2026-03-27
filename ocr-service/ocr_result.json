@@ -1,253 +1,245 @@
 {
-  "pot": "105 BB",
+  "pot": "886 BB",
   "board": [
-    "Aheart",
-    "??",
-    "Theart",
-    "Tdiamond",
-    "5spade"
+    "8heart",
+    "Kspade",
+    "6diamond",
+    "Aspade",
+    "4diamond"
   ],
   "player_hands": {
-    "xndidbh": [
-      "5heart",
-      "8heart"
+    "tuongduong": [
+      "Jclub",
+      "9club"
     ],
-    "Kotokugen": [
-      "4diamond",
-      "4heart"
-    ],
-    "哈迪斯方": [
-      "4club",
-      "8club"
+    "Dominicl": [
+      "Kheart",
+      "Jheart"
     ]
   },
   "positions": {
-    "Kotokugen": "SB",
-    "肾虚长老": "BB",
-    "哈迪斯方": "UTG",
-    "求你让我赢一次吧412": "MP",
-    "Haohaxie": "HJ",
-    "BackMyEV": "CO",
-    "xndidbh": "BTN"
+    "Lewisbets24": "SB",
+    "tuongduong": "BB",
+    "smokera": "UTG",
+    "迟迟到小雨": "UTG+1",
+    "asdf879": "MP",
+    "白银谭轩": "HJ",
+    "DominicL": "CO",
+    "SnoopAly": "BTN"
   },
   "streets": {
     "blinds_ante": [
       {
-        "player": "Kotokugen",
+        "player": "Lewisbets24",
         "pos": "SB",
         "action": "",
-        "amount": "￥2"
+        "sub_action": "",
+        "amount": "0.50BB"
       },
       {
-        "player": "肾虚长老",
+        "player": "tuongduong",
         "pos": "BB",
         "action": "",
-        "amount": "￥4"
+        "sub_action": "",
+        "amount": "1BB"
       },
       {
-        "player": "哈迪斯方",
+        "player": "smokera",
         "pos": "UTG",
         "action": "Straddle",
-        "amount": "￥8"
+        "sub_action": "",
+        "amount": "2BB"
       }
     ],
     "preflop": [
       {
-        "player": "求你让我赢一次吧412",
+        "player": "迟迟到小雨",
+        "pos": "UTG+1",
+        "action": "Raise",
+        "sub_action": "",
+        "amount": "8.50BB"
+      },
+      {
+        "player": "asdf879",
         "pos": "MP",
         "action": "Fold",
+        "sub_action": "",
         "amount": ""
       },
       {
-        "player": "Haohaxie",
+        "player": "白银谭轩",
         "pos": "HJ",
         "action": "Fold",
+        "sub_action": "",
         "amount": ""
       },
       {
-        "player": "BackMyEV",
-        "pos": "CO",
-        "action": "Fold",
-        "amount": ""
+        "player": "DominicL",
+        "pos": "HJ",
+        "action": "Call",
+        "sub_action": "",
+        "amount": "8.50 BB"
       },
       {
-        "player": "xndidbh",
+        "player": "SnoopAly",
         "pos": "BTN",
-        "action": "Check",
+        "action": "Fold",
+        "sub_action": "",
         "amount": ""
       },
       {
-        "player": "Kotokugen",
+        "player": "Lewisbets24",
         "pos": "SB",
-        "action": "Raise",
-        "amount": "￥29"
+        "action": "Call",
+        "sub_action": "",
+        "amount": "8BB"
       },
       {
-        "player": "肾虚长老",
+        "player": "tuongduong",
         "pos": "BB",
+        "action": "Raise",
+        "sub_action": "",
+        "amount": "45.50BB"
+      },
+      {
+        "player": "smokera",
+        "pos": "UTG",
         "action": "Fold",
+        "sub_action": "",
         "amount": ""
       },
       {
-        "player": "哈迪斯方",
-        "pos": "UTG",
-        "action": "Call",
-        "amount": "￥21"
+        "player": "迟迟到小雨",
+        "pos": "UTG+1",
+        "action": "Fold",
+        "sub_action": "",
+        "amount": ""
       },
       {
-        "player": "xndidbh",
-        "pos": "BTN",
-        "action": "Call",
-        "amount": "￥21"
+        "player": "Lewisbets24",
+        "pos": "SB",
+        "action": "Fold",
+        "sub_action": "",
+        "amount": ""
       }
     ],
     "flop": [
       {
-        "player": "Kotokugen",
-        "pos": "SB",
-        "action": "Check",
-        "amount": ""
+        "player": "tuongduong",
+        "pos": "BB",
+        "action": "Bet",
+        "sub_action": "",
+        "amount": "37.60BB"
       },
       {
-        "player": "哈迪斯方",
-        "pos": "UTG",
-        "action": "Check",
-        "amount": ""
-      },
-      {
-        "player": "xndidbh",
-        "pos": "BTN",
-        "action": "Check",
-        "amount": ""
+        "player": "DominicL",
+        "pos": "CO",
+        "action": "Call",
+        "sub_action": "",
+        "amount": "37.60 BB"
       }
     ],
     "turn": [
       {
-        "player": "Kotokugen",
-        "pos": "SB",
+        "player": "tuongduong",
+        "pos": "",
         "action": "Check",
+        "sub_action": "",
         "amount": ""
       },
       {
-        "player": "哈迪斯方",
-        "pos": "UTG",
-        "action": "Check",
-        "amount": ""
+        "player": "DominicL",
+        "pos": "CO",
+        "action": "Bet",
+        "sub_action": "",
+        "amount": "130BB"
       },
       {
-        "player": "xndidbh",
-        "pos": "BTN",
-        "action": "Check",
-        "amount": ""
+        "player": "tuongduong",
+        "pos": "BB",
+        "action": "Call",
+        "sub_action": "",
+        "amount": "130BB"
       }
     ],
     "river": [
       {
-        "player": "Kotokugen",
-        "pos": "SB",
+        "player": "tuongduong",
+        "pos": "BB",
         "action": "Check",
+        "sub_action": "",
         "amount": ""
       },
       {
-        "player": "哈迪斯方",
-        "pos": "UTG",
-        "action": "Check",
-        "amount": ""
+        "player": "DominicL",
+        "pos": "CO",
+        "action": "Raise",
+        "sub_action": "All-In",
+        "amount": "218BB"
       },
       {
-        "player": "xndidbh",
-        "pos": "BTN",
-        "action": "Check",
-        "amount": ""
+        "player": "tuongduong",
+        "pos": "BB",
+        "action": "Call",
+        "sub_action": "",
+        "amount": "218BB"
       }
     ],
     "showdown": [
       {
-        "player": "xndidbh",
-        "pos": "BTN",
-        "action": "",
-        "amount": "8."
-      },
-      {
-        "player": "Kotokugen",
+        "player": "tuongduong",
         "pos": "",
-        "action": "",
-        "amount": "-￥31"
+        "sub_action": "",
+        "amount": "+453 BB"
       },
       {
-        "player": "哈迪斯方",
-        "pos": "UTG",
-        "action": "",
-        "amount": "+￥74"
+        "player": "Dominicl",
+        "pos": "",
+        "sub_action": "",
+        "amount": "-432BB"
       }
     ]
   },
   "metadata": {
     "street_pots": {
-      "blinds_ante": "￥14",
-      "preflop": "￥28",
-      "flop": "￥105",
-      "turn": "￥105",
-      "river": "￥105",
+      "blinds_ante": "4BB",
+      "preflop": "7.50BB",
+      "flop": "114BB",
+      "turn": "189BB",
+      "river": "449BB",
       "showdown": "0 BB"
     }
   },
   "summary": {
     "board": [
-      "Aheart",
-      "??",
-      "Theart",
-      "Tdiamond",
-      "5spade"
+      "8heart",
+      "Kspade",
+      "6diamond",
+      "Aspade",
+      "4diamond"
     ],
-    "pot": "￥105",
+    "pot": "449BB",
     "winner": {
-      "player": null,
-      "amount": null
+      "player": "tuongduong",
+      "amount": "+453 BB",
+      "hand": [
+        "Jclub",
+        "9club"
+      ]
     },
     "players": {
-      "Kotokugen": {
+      "Lewisbets24": {
         "hand": [],
         "actions": [
           {
             "street": "blinds_ante",
             "action": "",
-            "amount": "￥2"
+            "amount": "0.50BB"
           },
           {
             "street": "preflop",
-            "action": "Raise",
-            "amount": "￥29"
-          },
-          {
-            "street": "flop",
-            "action": "Check",
-            "amount": ""
-          },
-          {
-            "street": "turn",
-            "action": "Check",
-            "amount": ""
-          },
-          {
-            "street": "river",
-            "action": "Check",
-            "amount": ""
-          },
-          {
-            "street": "showdown",
-            "action": "",
-            "amount": "-￥31"
-          }
-        ]
-      },
-      "肾虚长老": {
-        "hand": [],
-        "actions": [
-          {
-            "street": "blinds_ante",
-            "action": "",
-            "amount": "￥4"
+            "action": "Call",
+            "amount": "8BB"
           },
           {
             "street": "preflop",
@@ -256,110 +248,170 @@
           }
         ]
       },
-      "哈迪斯方": {
+      "tuongduong": {
+        "hand": [
+          "Jclub",
+          "9club"
+        ],
+        "actions": [
+          {
+            "street": "blinds_ante",
+            "action": "",
+            "amount": "1BB"
+          },
+          {
+            "street": "preflop",
+            "action": "Raise",
+            "amount": "45.50BB"
+          },
+          {
+            "street": "flop",
+            "action": "Bet",
+            "amount": "37.60BB"
+          },
+          {
+            "street": "turn",
+            "action": "Check",
+            "amount": ""
+          },
+          {
+            "street": "turn",
+            "action": "Call",
+            "amount": "130BB"
+          },
+          {
+            "street": "river",
+            "action": "Check",
+            "amount": ""
+          },
+          {
+            "street": "river",
+            "action": "Call",
+            "amount": "218BB"
+          },
+          {
+            "street": "showdown",
+            "action": "",
+            "amount": "+453 BB"
+          }
+        ]
+      },
+      "smokera": {
         "hand": [],
         "actions": [
           {
             "street": "blinds_ante",
             "action": "Straddle",
-            "amount": "￥8"
+            "amount": "2BB"
           },
+          {
+            "street": "preflop",
+            "action": "Fold",
+            "amount": ""
+          }
+        ]
+      },
+      "迟迟到小雨": {
+        "hand": [],
+        "actions": [
+          {
+            "street": "preflop",
+            "action": "Raise",
+            "amount": "8.50BB"
+          },
+          {
+            "street": "preflop",
+            "action": "Fold",
+            "amount": ""
+          }
+        ]
+      },
+      "asdf879": {
+        "hand": [],
+        "actions": [
+          {
+            "street": "preflop",
+            "action": "Fold",
+            "amount": ""
+          }
+        ]
+      },
+      "白银谭轩": {
+        "hand": [],
+        "actions": [
+          {
+            "street": "preflop",
+            "action": "Fold",
+            "amount": ""
+          }
+        ]
+      },
+      "DominicL": {
+        "hand": [],
+        "actions": [
           {
             "street": "preflop",
             "action": "Call",
-            "amount": "￥21"
+            "amount": "8.50 BB"
           },
           {
             "street": "flop",
-            "action": "Check",
-            "amount": ""
-          },
-          {
-            "street": "turn",
-            "action": "Check",
-            "amount": ""
-          },
-          {
-            "street": "river",
-            "action": "Check",
-            "amount": ""
-          },
-          {
-            "street": "showdown",
-            "action": "",
-            "amount": "+￥74"
-          }
-        ]
-      },
-      "求你让我赢一次吧412": {
-        "hand": [],
-        "actions": [
-          {
-            "street": "preflop",
-            "action": "Fold",
-            "amount": ""
-          }
-        ]
-      },
-      "Haohaxie": {
-        "hand": [],
-        "actions": [
-          {
-            "street": "preflop",
-            "action": "Fold",
-            "amount": ""
-          }
-        ]
-      },
-      "BackMyEV": {
-        "hand": [],
-        "actions": [
-          {
-            "street": "preflop",
-            "action": "Fold",
-            "amount": ""
-          }
-        ]
-      },
-      "xndidbh": {
-        "hand": [],
-        "actions": [
-          {
-            "street": "preflop",
-            "action": "Check",
-            "amount": ""
-          },
-          {
-            "street": "preflop",
             "action": "Call",
-            "amount": "￥21"
-          },
-          {
-            "street": "flop",
-            "action": "Check",
-            "amount": ""
+            "amount": "37.60 BB"
           },
           {
             "street": "turn",
-            "action": "Check",
-            "amount": ""
+            "action": "Bet",
+            "amount": "130BB"
           },
           {
             "street": "river",
-            "action": "Check",
+            "action": "Raise",
+            "amount": "218BB"
+          }
+        ]
+      },
+      "SnoopAly": {
+        "hand": [],
+        "actions": [
+          {
+            "street": "preflop",
+            "action": "Fold",
             "amount": ""
-          },
+          }
+        ]
+      },
+      "Dominicl": {
+        "hand": [
+          "Kheart",
+          "Jheart"
+        ],
+        "actions": [
           {
             "street": "showdown",
             "action": "",
-            "amount": "8."
+            "amount": "-432BB"
           }
         ]
       }
     }
   },
   "winner": {
-    "player": null,
-    "amount": null
-  }
+    "player": "tuongduong",
+    "amount": "+453 BB",
+    "hand": [
+      "Jclub",
+      "9club"
+    ]
+  },
+  "losers": [
+    {
+      "player": "Dominicl",
+      "amount": "-432BB",
+      "hand": [
+        "Kheart",
+        "Jheart"
+      ]
+    }
+  ]
 }

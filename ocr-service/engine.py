@@ -84,14 +84,15 @@ class LayoutEngine:
     def match_layout(self, image, ocr_engine=None):
         """
         Multi-signal layout detection.
-        Score = anchor_match (60%) + ocr_keyword (40%) + aspect_ratio bonus.
+        Score = anchor_match (70%) + aspect_ratio bonus (30%).
+        OCR keyword matching is optional and skipped if ocr_engine is None.
         Returns (layout_dict, score) for best match above threshold.
         """
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         h, w = image.shape[:2]
         aspect_ratio = w / float(h)
 
-        # Call OCR once and share result across layouts
+        # Call OCR only if an engine is provided (for backward compat)
         ocr_results = []
         if ocr_engine:
             try:
@@ -107,7 +108,8 @@ class LayoutEngine:
         for layout in self.config.get('layouts', []):
             score = 0.0
 
-            # Signal 1: Anchor template matching (weight 60%)
+            # Signal 1: Anchor template matching (weight 70% when no OCR)
+            anchor_weight = 0.6 if ocr_results else 0.7
             anchor_file = layout.get('anchor_file')
             if anchor_file:
                 template_path = os.path.join(self.templates_dir, anchor_file)
@@ -116,15 +118,15 @@ class LayoutEngine:
                     if template is not None:
                         res = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
                         _, cur_max_val, _, _ = cv2.minMaxLoc(res)
-                        score += cur_max_val * 0.6
+                        score += cur_max_val * anchor_weight
                         logger.debug(f"[LayoutEngine] {layout['name']} anchor score: {cur_max_val:.3f}")
 
-            # Signal 2: OCR keyword match (weight 40%)
+            # Signal 2: OCR keyword match (weight 30%, skipped if no OCR)
             keyword = layout.get('anchor_text', '').lower()
             if keyword and ocr_results:
                 for line in ocr_results:
                     if keyword in line[1][0].lower():
-                        score += line[1][1] * 0.4
+                        score += line[1][1] * 0.3
                         break
 
             # Signal 3: Aspect ratio — gradual penalty (not cliff)
@@ -399,7 +401,7 @@ class CardDetector:
         
         return paired_cards
 
-    def detect_cards_with_info(self, board_img, ocr_engine=None, game_phase=None, min_group_size=2, context="board", save_debug_image=True):
+    def detect_cards_with_info(self, board_img, game_phase=None, min_group_size=2, context="board", save_debug_image=True):
         """
         Main entry point for finding cards in an ROI using Symbol-Based Template Mapping.
         """

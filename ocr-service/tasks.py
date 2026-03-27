@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from celery_worker import celery_app
 from paddleocr import PaddleOCR
 from engine import LayoutEngine, CardDetector
@@ -18,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 # Initialize Engine Singletons
-ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)  # ch = Chinese + English + Numbers
+ocr = PaddleOCR(
+    use_angle_cls=False, lang='ch', show_log=False,
+    use_gpu=False, enable_mkldnn=True, cpu_threads=4,
+)
 layout_engine   = LayoutEngine(config_path="layout_config.json")
 card_detector   = CardDetector(templates_dir="templates")
 decision_layer  = DecisionLayer()
@@ -29,23 +33,13 @@ action_parser   = ActionLogParser()
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def parse_card_string_with_suit(txt, bbox, padded_img):
-    ranks = []
-    if 'BB' in txt or len(txt) > 3 or '.' in txt or ',' in txt:
-        return ranks
-    x1 = int(min(pt[0] for pt in bbox))
-    y1 = int(min(pt[1] for pt in bbox))
-    x2 = int(max(pt[0] for pt in bbox))
-    y2 = int(max(pt[1] for pt in bbox))
-    roi = padded_img[y1:y2, x1:x2]
-    if txt == '10':
-        return ['10' + get_suit_from_color(roi)]
-    char_w = (x2 - x1) // max(1, len(txt))
-    for i, char in enumerate(txt):
-        if char in ['A','K','Q','J','T','9','8','7','6','5','4','3','2']:
-            c_roi = roi[:, i*char_w:(i+1)*char_w] if char_w > 0 else roi
-            ranks.append(char + get_suit_from_color(c_roi))
-    return ranks
+def _ocr_region(img, region_key, regions):
+    """Crop a region and run OCR on it. Returns (region_key, crop, ocr_result)."""
+    if region_key not in regions:
+        return region_key, None, None
+    crop = layout_engine.crop_region(img, regions[region_key])
+    result = ocr.ocr(crop, cls=False)
+    return region_key, crop, result
 
 
 def detect_game_phase(board_cards: list) -> str:
@@ -83,8 +77,8 @@ def process_hand(image_hex: str, image_hash: str):
         if img is None:
             raise ValueError("Failed to decode image")
 
-        # 2. Layout Detection (multi-signal scoring)
-        match = layout_engine.match_layout(img, ocr_engine=ocr)
+        # 2. Layout Detection (template-only, no OCR needed)
+        match = layout_engine.match_layout(img)
         if not match:
             t_fail = time.time()
             logger.warning(f"[tasks] No layout matched for {image_hash}. Falling back to raw OCR.")
@@ -103,24 +97,24 @@ def process_hand(image_hex: str, image_hash: str):
         layout_name = layout['name']
         regions     = layout['regions']
         t_layout = time.time()
-        logger.info(f"[tasks] Layout: {layout_name} (score={layout_score:.3f})")
+        logger.info(f"[tasks] Layout: {layout_name} (score={layout_score:.3f}) [{(t_layout - start_time)*1000:.0f}ms]")
 
-        # 3. Board Card Detection
+        # 3. Board Card Detection (template-only, no OCR)
         board_cards  = []
-        card_info    = []  # Initialize outside conditional for use in self-learning
+        card_info    = []
         cv_conf_avg  = 0.0
         board_img    = None
 
         if 'board_cards' in regions:
             board_img = layout_engine.crop_region(img, regions['board_cards'])
-            res = card_detector.detect_cards_with_info(board_img, ocr_engine=ocr)
+            res = card_detector.detect_cards_with_info(board_img, context="board")
             card_info = res.get('cards', []) if isinstance(res, dict) else res
             is_reliable = res.get('is_reliable', False) if isinstance(res, dict) else False
 
             # Fallback if primary detection produced nothing useful
             if not card_info or all(c['name'] == '??' for c in card_info):
                 logger.info("[tasks] Primary detection weak — running FallbackStrategy.")
-                card_info = fallback.apply(board_img, card_detector, ocr, game_phase=None)
+                card_info = fallback.apply(board_img, card_detector, game_phase=None)
 
         # Smart gap-based padding: use X positions to detect missing cards
         if card_info:
@@ -185,146 +179,59 @@ def process_hand(image_hex: str, image_hash: str):
 
         logger.info(f"[tasks] Decision: {outcome['decision']} | Final conf: {outcome['final']:.3f}")
 
-        # 7. Self-Learning — learn from high-confidence OCR detections
-        # Runs on both AUTO_ACCEPT and FORCE_CORRECT (if conf is high enough)
-        if board_img is not None:
-            for item in card_info:
-                name = item['name']
-                if not name or name == '??':
-                    continue
+        # 7. Parallel Per-Region OCR — pot, action_log
+        t_ocr_start = time.time()
+        ocr_regions = ['pot_area', 'action_log']
+        ocr_results = {}  # region_key -> (crop, ocr_result)
 
-                if item.get('is_new'):
-                    # OCR-detected card: save as new template if confidence >= 0.75
-                    # (PaddleOCR text conf rarely exceeds 0.95, so 0.95 was too strict)
-                    if item['confidence'] >= 0.75:
-                        logger.info(f"[LEARN] New card '{name}' via OCR (conf={item['confidence']:.2f}) — saving template.")
-                        card_detector.learn_card(item['image'], name, verification_source='high_confidence', layout_name=layout_name)
-                else:
-                    # Template-matched card: reinforce to reset decay clock on last_used
-                    if item['confidence'] >= 0.92 and outcome['decision'] == DECISION_AUTO_ACCEPT:
-                        card_detector.learn_card(item['image'], name, verification_source='high_confidence', layout_name=layout_name)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(_ocr_region, img, rk, regions) for rk in ocr_regions]
+            for future in futures:
+                rk, crop, result = future.result()
+                ocr_results[rk] = (crop, result)
 
-        # 8. Pot OCR
+        t_ocr = time.time()
+        logger.info(f"[tasks] Parallel OCR (pot+action) completed in {(t_ocr - t_ocr_start)*1000:.0f}ms")
+
+        # 8. Pot
         raw_pot_text = ""
-        if 'pot_area' in regions:
-            pot_img = layout_engine.crop_region(img, regions['pot_area'])
-            pot_res = ocr.ocr(pot_img, cls=False)
-            if pot_res and pot_res[0]:
-                raw_pot_text = " ".join([line[1][0] for line in pot_res[0]])
+        pot_crop, pot_res = ocr_results.get('pot_area', (None, None))
+        if pot_res and pot_res[0]:
+            raw_pot_text = " ".join([line[1][0] for line in pot_res[0]])
 
-        # 9. Action Log Parsing (5-phase matrix from action_parser.py)
+        # 9. Action Log Parsing
         streets_data = {}
         street_pots = {}
-        if 'action_log' in regions:
-            action_img = layout_engine.crop_region(img, regions['action_log'])
-            action_ocr = ocr.ocr(action_img, cls=False)
-
-            # Calculate sidebar boundary in action_img coordinates
-            sidebar_x = None
-            if 'sidebar' in regions:
-                ah, aw = action_img.shape[:2]
-                sidebar_x1_ratio = regions['sidebar']['x1']
-                action_x1_ratio = regions['action_log']['x1']
-                action_x2_ratio = regions['action_log']['x2']
-                action_range = action_x2_ratio - action_x1_ratio
-                sidebar_x = int((sidebar_x1_ratio - action_x1_ratio) / action_range * aw) if action_range > 0 else None
-
+        action_img, action_ocr = ocr_results.get('action_log', (None, None))
+        if action_img is not None:
             parsed_actions = action_parser.parse(
-                action_img, action_ocr, card_detector, ocr,
-                sidebar_x=sidebar_x, layout_name=layout_name
+                action_img, action_ocr, card_detector, None,
+                layout_name=layout_name
             )
             streets_data = parsed_actions['streets']
             street_pots = parsed_actions['street_pots']
 
+        # 10. Extract player hands and clean up
+        RANK_ORDER = {'A': 0, 'K': 1, 'Q': 2, 'J': 3, 'T': 4, '9': 5, '8': 6, '7': 7, '6': 8, '5': 9, '4': 10, '3': 11, '2': 12}
+        def sort_hand(cards):
+            return sorted(cards, key=lambda c: RANK_ORDER.get(c[0], 99) if c else 99)
 
-
-        # 11. Showdown Detection — detect card pairs then OCR to map to player names
-        showdown_cards = {}
-        if 'showdown_area' in regions:
-            showdown_img = layout_engine.crop_region(img, regions['showdown_area'])
-            sd_info = card_detector.detect_cards_with_info(showdown_img, ocr_engine=ocr)
-            sd_cards_list = sd_info.get('cards', []) if isinstance(sd_info, dict) else []
-
-            # Group detected cards by 'row' index (each row = one player's pair)
-            sd_by_row: dict = {}
-            for item in sd_cards_list:
-                row_idx = item.get('row', 0)
-                sd_by_row.setdefault(row_idx, [])
-                if isinstance(item, dict):
-                    sd_by_row[row_idx].append(item)
-
-            # Collect all known player names from action log (candidate set)
-            known_players: set = set()
-            for sk in STREET_KEYS:
-                for e in streets_data.get(sk, []):
-                    if isinstance(e, dict) and e.get('player'):
-                        known_players.add(e['player'])
-
-            # OCR the showdown area to find player name text near each card group
-            sd_ocr_results = ocr.ocr(showdown_img, cls=False)
-            sd_text_boxes: list = []
-            if sd_ocr_results and sd_ocr_results[0]:
-                for line in sd_ocr_results[0]:
-                    text = line[1][0].strip()
-                    x_c = sum(p[0] for p in line[0]) / 4.0
-                    y_c = sum(p[1] for p in line[0]) / 4.0
-                    if text in known_players:
-                        sd_text_boxes.append({'text': text, 'x': x_c, 'y': y_c})
-
-            for slot_idx, (row_idx, cards_in_row) in enumerate(sd_by_row.items()):
-                cards = [c['name'] for c in cards_in_row if isinstance(c, dict) and c['name'] != '??'][:2]
-                if not cards:
-                    continue
-
-                avg_x = sum(c['center'][0] for c in cards_in_row if isinstance(c, dict)) / max(len(cards_in_row), 1)
-                avg_y = sum(c['center'][1] for c in cards_in_row if isinstance(c, dict)) / max(len(cards_in_row), 1)
-
-                best_name: str = ''
-                best_dist: float = 300.0
-                for tb in sd_text_boxes:
-                    dist = ((tb['x'] - avg_x) ** 2 + (tb['y'] - avg_y) ** 2) ** 0.5
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_name = tb['text']
-
-                slot_key = best_name if best_name else f"player_{slot_idx + 1}"
-                showdown_cards[slot_key] = cards
-
-            if showdown_cards:
-                logger.info(f"[tasks] Showdown detected: {showdown_cards}")
-
-        # 11b. Build unified player_hands map
-        player_hands: dict = {}
-
-        # Source 1: hands spotted in the action log next to a named player
-        for street_key in STREET_KEYS:
-            for entry in streets_data.get(street_key, []):
-                if not isinstance(entry, dict):
-                    continue
-                cards = [c for c in entry.get('hand', []) if c and c != '??']
-                if cards and entry.get('player'):
-                    name = entry['player']
-                    existing = player_hands.get(name, [])
-                    merged = (existing + cards)[:2]
-                    # If 2 identical cards → suit must be wrong on at least one
-                    if len(merged) == 2 and merged[0] == merged[1] and len(merged[0]) >= 2:
-                        rank = merged[0][:-1]
-                        merged = [f"{rank}?", f"{rank}?"]
-                    player_hands[name] = merged
-
-        # Source 2: showdown area cards (only add if player not already known)
-        for slot_key, pair in showdown_cards.items():
-            if slot_key not in player_hands:
-                player_hands[slot_key] = pair
-
-
-
-        # 11d. Strip 'hand' and 'card_images' from all street action entries
-        for sk in STREET_KEYS:
-            for entry in streets_data.get(sk, []):
-                if isinstance(entry, dict):
-                    entry.pop('hand', None)
-                    entry.pop('card_images', None)
+        player_hands = {}
+        for s in STREET_KEYS:
+            for e in streets_data.get(s, []):
+                if isinstance(e, dict) and e.get('hand') and e.get('player'):
+                    sorted_h = sort_hand(e['hand'])
+                    e['hand'] = sorted_h
+                    player_hands[e['player']] = sorted_h
+                
+                # Cleanup output
+                if isinstance(e, dict):
+                    e.pop('image', None)
+                    e.pop('card_images', None)
+                    e.pop('card_objs', None)
+                    e.pop('hand', None)
+                    if s == 'showdown':
+                        e.pop('action', None)
 
         logger.info(f"[tasks] player_hands: {player_hands}")
 
@@ -365,32 +272,35 @@ def process_hand(image_hex: str, image_hash: str):
             "player_hands": player_hands,
             "positions": positions,
             "streets": streets_data,
-            "showdown": showdown_cards,
             "metadata": {"street_pots": street_pots}
         }
 
         # 12b. Build winner/losers from showdown entries
-        winner_entry = {"player": None, "amount": None, "hand": []}
+        winner_entry = {"player": None, "amount": None}
         loser_entries = []
         for e in streets_data.get('showdown', []) + streets_data.get('river', []):
             if not isinstance(e, dict):
                 continue
             amt = str(e.get('amount', '')).strip()
-            if amt.startswith('+'):
-                if not winner_entry['player']:
+            if e.get('action') == 'WINNER' or amt.startswith('+'):
+                if not winner_entry.get('player'):
                     p_name = e.get('player', '')
                     winner_entry = {
                         "player": p_name,
                         "amount": amt,
                         "hand": player_hands.get(p_name, [])
                     }
-            elif amt.startswith('-'):
+            elif e.get('action') == 'LOSER' or amt.startswith('-'):
                 p_name = e.get('player', '')
                 loser_entries.append({
                     "player": p_name,
                     "amount": amt,
                     "hand": player_hands.get(p_name, [])
                 })
+        if not winner_entry.get('player'):
+            wi = streets_data.get('winner', {})
+            if wi:
+                winner_entry = wi
 
         # 12c. Build summary (per-player action history + hands)
         final_summary = {

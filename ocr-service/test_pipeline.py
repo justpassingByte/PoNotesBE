@@ -46,6 +46,8 @@ logger = logging.getLogger("test_pipeline")
 from paddleocr import PaddleOCR
 from engine import LayoutEngine, CardDetector
 from action_parser import ActionLogParser, greedy_pot, parse_bb_value, format_bb, STREET_KEYS
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 
 def test_pipeline(img_path="ocrtestMain.png"):
@@ -64,17 +66,24 @@ def test_pipeline(img_path="ocrtestMain.png"):
     h, w = img.shape[:2]
     print(f"  Image size: {w}x{h}")
 
-    # 1. Detection
-    ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)
+    # 1. Layout Detection (template-only, no OCR needed)
     engine = LayoutEngine()
-    best_match = engine.match_layout(img, ocr_engine=ocr)
+    t0 = time.time()
+    best_match = engine.match_layout(img)
+    t_layout = time.time()
     if not best_match:
         print("[ERROR] No layout matched!")
         return
     
     layout, score = best_match
     layout_name = layout.get('name', 'Unknown')
-    print(f"\n[✓] Layout: {layout_name} (score={score:.3f})")
+    print(f"\n[✓] Layout: {layout_name} (score={score:.3f}) [{(t_layout - t0)*1000:.0f}ms]")
+
+    # 1b. Initialize OCR engine with MKL-DNN
+    ocr = PaddleOCR(
+        use_angle_cls=False, lang='ch', show_log=False,
+        use_gpu=False, enable_mkldnn=True, cpu_threads=4
+    )
 
     # 2. Board Cards (template-only, no OCR for cards)
     detector = CardDetector()
@@ -151,15 +160,30 @@ def test_pipeline(img_path="ocrtestMain.png"):
         
         print(f"\n  Board (final): {board_cards}")
 
-    # 3. Pot Area
-    pot_region = layout['regions'].get('pot_area')
-    pot_crop = engine.crop_region(img, pot_region) if pot_region else None
+    # 3. Parallel Per-Region OCR: pot + action in parallel
+    def _ocr_crop(region_key):
+        region = layout['regions'].get(region_key)
+        if not region:
+            return region_key, None, None
+        crop = engine.crop_region(img, region)
+        result = ocr.ocr(crop, cls=False)
+        return region_key, crop, result
+
+    t_ocr_start = time.time()
+    ocr_results = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(_ocr_crop, rk) for rk in ['pot_area', 'action_log']]
+        for f in futures:
+            rk, crop, result = f.result()
+            ocr_results[rk] = (crop, result)
+    t_ocr = time.time()
+    print(f"  Parallel OCR (pot+action) completed in {(t_ocr - t_ocr_start)*1000:.0f}ms")
+
+    # 3a. Pot
     pot_text = ""
-    if pot_crop is not None:
-        ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)
-        res = ocr.ocr(pot_crop, cls=False)
-        if res and res[0]:
-            pot_text = " ".join([line[1][0] for line in res[0]])
+    pot_crop, pot_res = ocr_results.get('pot_area', (None, None))
+    if pot_res and pot_res[0]:
+        pot_text = " ".join([line[1][0] for line in pot_res[0]])
     
     pot_val = greedy_pot(pot_text) if pot_text else 0
     print("\n" + "─" * 40)
@@ -170,14 +194,13 @@ def test_pipeline(img_path="ocrtestMain.png"):
 
     # 4. Action Log
     action_parser = ActionLogParser()
-    action_log_region = layout['regions'].get('action_log')
-    action_crop = engine.crop_region(img, action_log_region) if action_log_region else None
+    action_crop, action_ocr = ocr_results.get('action_log', (None, None))
     
     print("\n" + "─" * 40)
     print("  ACTION LOG (5-Phase Parser)")
     print("─" * 40)
     
-    parsed = {"streets": {}}
+    parsed = {"streets": {}, "street_pots": {}}
     if action_crop is not None:
         print(f"  Crop size: {action_crop.shape[1]}x{action_crop.shape[0]}")
         
@@ -186,9 +209,8 @@ def test_pipeline(img_path="ocrtestMain.png"):
         river_col_crop = engine.crop_region(img, river_region) if river_region else None
         
         # Save the base river and action crops for layout debugging
-        if action_crop is not None:
-            cv2.imwrite("debug_crops/layout_action_crop.png", action_crop)
-            print(f"  → Dumped layout crop: debug_crops/layout_action_crop.png")
+        cv2.imwrite("debug_crops/layout_action_crop.png", action_crop)
+        print(f"  → Dumped layout crop: debug_crops/layout_action_crop.png")
         if river_col_crop is not None:
             cv2.imwrite("debug_crops/layout_river_crop.png", river_col_crop)
             print(f"  → Dumped layout crop: debug_crops/layout_river_crop.png")
@@ -207,18 +229,13 @@ def test_pipeline(img_path="ocrtestMain.png"):
                     cv2.imwrite(debug_path, card_data['image'])
                     print(f"    → Saved {debug_path} (rect={card_data['rect']})")
         
-        # Get raw OCR for the action log
-        ocr = PaddleOCR(use_angle_cls=False, lang='ch', show_log=False)
-        res = ocr.ocr(action_crop, cls=False)
-        
         parsed = action_parser.parse(
             action_crop,
-            res,
+            action_ocr,
             card_detector=detector,
-            ocr_engine=ocr,
+            ocr_engine=None,
             layout_name=layout_name
         )
-
         # Debug dump: Chỉ lưu ảnh card đã match với Player
         all_cards = parsed.get('all_card_rects', [])
         # Lưu các card đã vào tay người chơi (trên mọi street)
@@ -255,12 +272,19 @@ def test_pipeline(img_path="ocrtestMain.png"):
     }
     
     # 5. Collect player hands BEFORE cleanup (pop removes them from entries)
+    RANK_ORDER = {'A': 0, 'K': 1, 'Q': 2, 'J': 3, 'T': 4, '9': 5, '8': 6, '7': 7, '6': 8, '5': 9, '4': 10, '3': 11, '2': 12}
+    def sort_hand(cards):
+        """Sort cards by rank (A first, 2 last)."""
+        return sorted(cards, key=lambda c: RANK_ORDER.get(c[0], 99) if c else 99)
+    
     temp_hands = {}
     for s in STREET_KEYS:
         for e in parsed['streets'].get(s, []):
             if isinstance(e, dict) and e.get('hand') and e.get('player'):
-                temp_hands[e['player']] = e['hand']
-                final_result['player_hands'][e['player']] = e['hand']
+                sorted_h = sort_hand(e['hand'])
+                e['hand'] = sorted_h
+                temp_hands[e['player']] = sorted_h
+                final_result['player_hands'][e['player']] = sorted_h
 
     # 6. Final Output Cleanup (remove images and redundant data for JSON)
     for s in STREET_KEYS:
@@ -268,7 +292,11 @@ def test_pipeline(img_path="ocrtestMain.png"):
             if isinstance(e, dict):
                 e.pop('image', None)
                 e.pop('card_images', None)
+                e.pop('card_objs', None)
                 e.pop('hand', None)
+                # Remove action field from showdown entries
+                if s == 'showdown':
+                    e.pop('action', None)
             
             # Populate positions
             if isinstance(e, dict) and e.get('player'):
@@ -390,14 +418,30 @@ def test_pipeline(img_path="ocrtestMain.png"):
             return super().default(obj)
 
     # 8. Update summary with player hands and winner
-    # Derive winner from river entries
-    winner_entry = None
-    for e in parsed['streets'].get('river', []):
-        if isinstance(e, dict) and e.get('action') == 'WINNER':
-            winner_entry = {"player": e.get('player', ''), "amount": e.get('amount', '')}
-            break
-    if not winner_entry:
-        winner_entry = parsed.get('winner', {})
+    # Derive winner/losers from showdown entries
+    winner_entry = {"player": None, "amount": None}
+    loser_entries = []
+    for e in parsed['streets'].get('showdown', []) + parsed['streets'].get('river', []):
+        if not isinstance(e, dict):
+            continue
+        amt = e.get('amount', '').strip()
+        if e.get('action') == 'WINNER' or amt.startswith('+'):
+            if not winner_entry['player']:
+                winner_entry = {
+                    "player": e.get('player', ''),
+                    "amount": amt,
+                    "hand": temp_hands.get(e.get('player', ''), [])
+                }
+        elif e.get('action') == 'LOSER' or amt.startswith('-'):
+            loser_entries.append({
+                "player": e.get('player', ''),
+                "amount": amt,
+                "hand": temp_hands.get(e.get('player', ''), [])
+            })
+    if not winner_entry['player']:
+        wi = parsed.get('winner', {})
+        if wi:
+            winner_entry = wi
     
     final_summary = {
         "board": board_cards,
@@ -406,9 +450,8 @@ def test_pipeline(img_path="ocrtestMain.png"):
         "players": {}
     }
     
-    # Populate player hands summary across all streets
+    # Populate player actions summary across all streets
     for street in STREET_KEYS:
-        # Re-fetch original entries from 'parsed' to get hands back
         for act in parsed['streets'].get(street, []):
             if not isinstance(act, dict):
                 continue
@@ -417,26 +460,31 @@ def test_pipeline(img_path="ocrtestMain.png"):
                 continue
             if p_name not in final_summary["players"]:
                 final_summary["players"][p_name] = {"hand": [], "actions": []}
-            if act.get('hand'):
-                # Add unique cards
-                for c in act['hand']:
-                    if c not in final_summary["players"][p_name]["hand"]:
-                        final_summary["players"][p_name]["hand"].append(c)
             final_summary["players"][p_name]["actions"].append({
                 "street": street,
                 "action": act.get('action', ''),
                 "amount": act.get('amount', '')
             })
+    
+    # Merge player hands from temp_hands (collected before cleanup)
+    for p_name, cards in temp_hands.items():
+        if p_name not in final_summary["players"]:
+            final_summary["players"][p_name] = {"hand": [], "actions": []}
+        final_summary["players"][p_name]["hand"] = cards
             
     # Inject final summary into result
     final_result["summary"] = final_summary
     final_result["winner"] = winner_entry
+    final_result["losers"] = loser_entries
     
     # Save JSON result
     with open("ocr_result.json", "w", encoding="utf-8") as f:
         json.dump(final_result, f, ensure_ascii=False, indent=2, cls=NumpyEncoder)
     
-    print("\n[✔] Result saved to ocr_result.json")
+    t_end = time.time()
+    total_ms = round((t_end - t0) * 1000)
+    print(f"\n[✔] Result saved to ocr_result.json")
+    print(f"[⏱] Total pipeline: {total_ms}ms (Layout: {(t_layout-t0)*1000:.0f}ms, OCR: {(t_ocr-t_ocr_start)*1000:.0f}ms, Processing: {(t_end-t_ocr)*1000:.0f}ms)")
 
 if __name__ == "__main__":
     img_path = sys.argv[1] if len(sys.argv) > 1 else "ocrtestMain.png"
