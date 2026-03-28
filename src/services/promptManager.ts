@@ -126,22 +126,31 @@ ${profileContext}
 ${customBase}
 ${systemFooter}
 
+### DETAILED ANALYSIS REQUIREMENT:
+You MUST act as an elite Poker Coach. Do NOT output generic filler text (like "Phân tích hành động của người chơi"). 
+Your "summary", "reasoning_trace", and "mistakes" descriptions MUST be deep, specific, and reference exact hand combinations, sizing, and board textures. Be highly analytical.
+
 ### OUTPUT SCHEMA (STRICT JSON):
 {
-  "summary": "Technical overview",
-  "reasoning_trace": ["Logic 1", "Logic 2"],
+  "summary": "Detailed technical overview of the hand. Describe the preflop dynamics, flop texture, and the overarching theme of the hand in at least 2-3 sentences.",
+  "reasoning_trace": [
+    "Step-by-step logic of the key decision points.",
+    "Detailed evaluation of sizing, ranges, and board texture."
+  ],
   "mistakes": [{ 
-    "street": "string", 
-    "player": "string", 
+    "street": "preflop|flop|turn|river", 
+    "player": "Exact player name", 
     "position": "string (Target table position like BTN/SB/BB)",
-    "description": "string", 
-    "better_line": "string",
-    "gto_deviation_reason": "string",
+    "description": "Specific error made. Must mention hand ranges and sizing context.", 
+    "better_line": "The exact action and sizing they should have taken.",
+    "gto_deviation_reason": "Why this deviated from optimal play (e.g. 'c-bet size is too large for this dry texture').",
     "severity": "minor|moderate|critical"
   }],
-  "exploit_suggestions": ["string"],
+  "exploit_suggestions": [
+    "Actionable, highly specific exploit strategies based on the identified leaks."
+  ],
   "final_verdict": {
-    "grade": "A-F",
+    "grade": "A|B|C|D|F",
     "confidence_score": 0.0-1.0,
     "suggestion_type": "GTO | Exploit | Balanced"
   }
