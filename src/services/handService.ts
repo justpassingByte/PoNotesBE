@@ -254,12 +254,14 @@ export class HandService {
             parsedData = this.parseTextHand(params.rawInput);
         }
 
+        const rawDataToSave = params.rawInput || (params.fileBytes ? `data:${params.mimeType || 'image/png'};base64,${params.fileBytes.toString('base64')}` : "");
+
         // Always create new hand record (unique hash per upload)
         const hand = await prisma.hand.create({
             data: {
                 user_id: params.userId,
                 hand_hash: hash,
-                raw_input: params.rawInput,
+                raw_input: rawDataToSave,
                 input_type: params.inputType,
                 parsed_data: parsedData as any,
                 ai_analysis: null as any,

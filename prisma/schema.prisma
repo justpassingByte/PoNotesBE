@@ -221,7 +221,7 @@ model Hand {
   id          String   @id @default(uuid())
   user_id     String
   hand_hash   String   @unique // Canonical hash for caching
-  raw_input   String // Original text or image URL
+  raw_input   String   @default("") // Original text or image URL
   input_type  String   @default("text") // "text" | "image"
   parsed_data Json? // Structured hand JSON (positions, actions, board)
   ai_analysis Json? // AI output: heroMistakes, villainMistakes, betterLine, exploit
