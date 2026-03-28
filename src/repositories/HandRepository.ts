@@ -57,10 +57,18 @@ export class HandRepository {
                 cursor: { id: options.cursor }
             } : {}),
             orderBy: { created_at: 'desc' },
-            include: { 
+            select: {
+                id: true,
+                hand_hash: true,
+                input_type: true,
+                tags: true,
+                created_at: true,
+                parsed_data: true,
+                ai_analysis: true,
+                user_id: true,
+                // raw_input excluded — contains large base64 images, not needed for list view
                 notes: true,
-                // @ts-ignore
-                system_logs: { orderBy: { created_at: 'asc' } }
+                system_logs: { orderBy: { created_at: 'asc' as const } }
             }
         });
     }

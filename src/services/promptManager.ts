@@ -246,7 +246,8 @@ Convert notes and tendencies into **precise, executable OFFENSIVE exploit strate
 ### 1. ACTION-TYPE VALIDATION (STRICT)
 - Fold → sizing MUST be strictly null (Do NOT invent "0" or "0x")
 - Call → sizing MUST be strictly null (Do NOT invent "0" or "0x")
-- Raise/Bet/3bet/4bet → must include numeric sizing (e.g. "2.5x", "75%")
+- Raise/Bet/3bet/4bet → must include sizing as PERCENTAGE OF POT (e.g. "33% pot", "75% pot", "125% pot")
+- FORBIDDEN sizing formats: "2.5x", "3x", "big", "small". Always use "XX% pot".
 
 ### 2. EXPLOIT TYPE PRIORITY (MANDATORY)
 When an opponent has a clear leak:
@@ -312,12 +313,12 @@ ${settings?.language === 'vi' ? 'Respond strictly in Vietnamese (vi), but retain
   ],
   "strategy": [
     {
-      "node": "string (Street | Pos | Facing)",
-      "action": "string",
-      "range": "string (Exact hand classes)",
+      "node": "STREET | POSITION | FACING_ACTION (e.g. 'FLOP | BTN | vs CBET')",
+      "action": "BET|RAISE|CALL|FOLD|CHECK|3BET|4BET",
+      "range": "Exact poker notation (e.g. 'TT+, AQs+, AKo')",
       "structure": "linear|polar",
-      "sizing": "string | null (MANDATORY NULL FOR FOLD/CALL)",
-      "frequency": "string (Exact %)"
+      "sizing": "XX% pot (e.g. '75% pot', '125% pot') | null for FOLD/CALL",
+      "frequency": "XX% (e.g. '80%', '100%')"
     }
   ]
 }
