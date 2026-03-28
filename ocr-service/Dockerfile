@@ -14,7 +14,8 @@ WORKDIR /app
 
 # Optimization: Pre-install core ML libs to avoid long rebuilds
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip uninstall -y opencv-python opencv-contrib-python 2>/dev/null; true
 
 # Create directories for models and logs
 RUN mkdir -p /root/.paddleocr /app/logs
