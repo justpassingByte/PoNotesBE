@@ -469,28 +469,22 @@ export class HandService {
     }
 
     private async autoExtractNotesFromAnalysis(userId: string, hand: any, parsedHand: ParsedHand, analysis: HandAnalysis): Promise<string[]> {
-        const heroPlayer = parsedHand.players?.find(p => p.hole_cards && p.hole_cards.length > 0);
-        const heroName = heroPlayer?.name?.toLowerCase() || 'hero';
-
-        const villainMistakes = (analysis as any).villainMistakes || analysis.mistakes?.filter(m => {
-            const lowName = m.player?.toLowerCase();
-            return lowName !== 'hero' && lowName !== heroName;
-        }) || [];
-        if (villainMistakes.length === 0 && !analysis.exploit_suggestions?.length) {
-            await LoggerService.log(userId, LogType.SYSTEM, `No actionable villain leaks found in this hand.`, { handId: hand.id }, hand.id);
+        const allMistakes = analysis.mistakes || [];
+        if (allMistakes.length === 0 && !analysis.exploit_suggestions?.length) {
+            await LoggerService.log(userId, LogType.SYSTEM, `No actionable leaks found in this hand.`, { handId: hand.id }, hand.id);
             return [];
         }
 
         await LoggerService.log(
             userId,
             LogType.AI_LEARNING,
-            `Extracting ${villainMistakes.length} actionable leaks from AI neural output...`,
-            { raw_mistakes: villainMistakes.map((m: any) => m.description) },
+            `Extracting ${allMistakes.length} actionable leaks from AI neural output...`,
+            { raw_mistakes: allMistakes.map((m: any) => m.description) },
             hand.id
         );
 
         const createdNoteIds: string[] = [];
-        for (const mistake of villainMistakes) {
+        for (const mistake of allMistakes) {
             const playerName = mistake.playerName || mistake.player;
             if (!playerName || !mistake.description) continue;
 
