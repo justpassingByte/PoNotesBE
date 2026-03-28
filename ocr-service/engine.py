@@ -713,7 +713,7 @@ class CardDetector:
         return filtered
 
     def detect_cards_with_info(self, board_img, game_phase=None, min_group_size=2,
-                              context="board", save_debug_image=True):
+                              context="board", save_debug_image=False):
         """
         Main entry point for finding cards in an ROI using Symbol-Based Template Mapping.
         """
