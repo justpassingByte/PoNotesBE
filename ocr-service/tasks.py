@@ -401,30 +401,20 @@ def process_hand(image_data: str, image_hash: str):
 
 # ─── Feedback Endpoint Task (Phase 4) ──────────────────────────────────────────
 
-@celery_app.task(name="tasks.apply_feedback")
-def apply_feedback(
-    image_hex: str,
+def apply_feedback_bytes(
+    img_bytes: bytes,
     card_name: str,
     action: str,            # "confirm" | "edit" | "reject"
     corrected_name: str = "",
     card_index: Optional[int] = None
 ):
     """
-    Processes user feedback from the Confirmation / Correction UI.
+    Processes user feedback directly from bytes.
     action="confirm"  → learn with verification_source='user_confirmed'
     action="edit"     → learn corrected card as 'user_corrected' (gold label)
     action="reject"   → log to failed_cases, no learning
     """
     try:
-        # 1. Decode Image (Handle both Hex and Base64/DataURL)
-        if "," in image_hex: # Handle Data URL
-            image_hex = image_hex.split(",")[1]
-            
-        try:
-            img_bytes = bytes.fromhex(image_hex)
-        except ValueError:
-            img_bytes = base64.b64decode(image_hex)
-            
         nparr = np.frombuffer(img_bytes, np.uint8)
         img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:

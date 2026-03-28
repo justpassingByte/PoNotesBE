@@ -199,13 +199,13 @@ class LayoutEngine:
 # ─────────────────────────────────────────────
 
 # Labels that easily raise false positives due to thin/generic shapes
-_PENALIZED_LABELS = frozenset({'J', '7', '1', 'I'})
+_PENALIZED_LABELS = frozenset({'7', '1', 'I'})
 
 # Context-specific configuration
 _CONTEXT_CONFIG = {
     "board": {
-        "rank_scales": [1.0, 1.1],
-        "suit_scales": [1.0, 1.1],
+        "rank_scales": [1.0],
+        "suit_scales": [1.0],
         "suit_threshold": 0.80,
         "rank_threshold": 0.75,
         "max_dx": 80,
@@ -229,8 +229,6 @@ for _cfg in _CONTEXT_CONFIG.values():
     for _key, _val in _cfg.items():
         if isinstance(_val, list) and _key.endswith('scales') or _key.endswith('_scales') or 'scale' in _key:
             _ALL_SCALES.update(_val)
-# Also include the default fallback scales
-_ALL_SCALES.update([0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2])
 _ALL_SCALES = sorted(_ALL_SCALES)
 
 
@@ -430,7 +428,7 @@ class CardDetector:
             search_images = [image_gray]
 
         if scales is None:
-            scales = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]
+            scales = _ALL_SCALES
 
         results = []
 
@@ -469,6 +467,10 @@ class CardDetector:
                             })
                             if score > best_score_for_tmpl:
                                 best_score_for_tmpl = score
+
+                    # Skip remaining search images if this scale already matched well
+                    if best_score_for_tmpl > 0.88:
+                        break
 
                 # Early exit: if this template already matched at very high confidence,
                 # skip remaining scales — the match is definitive.

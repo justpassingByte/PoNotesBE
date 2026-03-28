@@ -58,14 +58,15 @@ async def extract_hand_data(file: UploadFile = File(...)):
     
     image_bytes = await file.read()
     image_hash = hashlib.md5(image_bytes).hexdigest()
-    image_b64 = base64.b64encode(image_bytes).decode('ascii')
-    
-    job = celery_app.send_task(
-        "tasks.process_hand",
-        args=[image_b64, image_hash]
-    )
-    
-    return {"status": "queued", "job_id": job.id}
+
+    try:
+        from tasks import process_hand_bytes
+        from fastapi.concurrency import run_in_threadpool
+        # Run heavy CPU tasks in a threadpool so the main event loop doesn't block
+        result = await run_in_threadpool(process_hand_bytes, image_bytes, image_hash)
+        return {"status": "success", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/ocr/sync")
@@ -107,22 +108,37 @@ async def get_ocr_result(job_id: str):
     
     return JobResponse(status=res.state.lower(), job_id=job_id)
 
+from fastapi import Form
+
 @app.post("/feedback")
-async def submit_feedback(req: FeedbackRequest):
+async def submit_feedback(
+    file: UploadFile = File(...),
+    card_name: str = Form(...),
+    action: str = Form(...),
+    corrected_name: str = Form(""),
+    card_index: Optional[int] = Form(None)
+):
     """
-    Task 4.1/4.2: User feedback endpoint for OCR Confirmation UI.
-    Queues apply_feedback Celery task.
+    User feedback endpoint for OCR Confirmation UI.
+    Runs apply_feedback directly as a thread pool task, skipping base64/hex encode.
     """
-    if req.action not in ("confirm", "edit", "reject"):
+    if action not in ("confirm", "edit", "reject"):
         raise HTTPException(status_code=400, detail='action must be "confirm", "edit", or "reject".')
-    if req.action == "edit" and not req.corrected_name:
+    if action == "edit" and not corrected_name:
         raise HTTPException(status_code=400, detail='"corrected_name" is required for edit action.')
 
-    job = celery_app.send_task(
-        "tasks.apply_feedback",
-        args=[req.image_hex, req.card_name, req.action, req.corrected_name, req.card_index]
-    )
-    return {"status": "queued", "job_id": job.id, "action": req.action}
+    image_bytes = await file.read()
+
+    try:
+        from tasks import apply_feedback_bytes
+        from fastapi.concurrency import run_in_threadpool
+        result = await run_in_threadpool(
+            apply_feedback_bytes, image_bytes, card_name, action, corrected_name, card_index
+        )
+        return {"status": "ok", "action": action, "result": result}
+    except Exception as e:
+        logger.error(f"[feedback] Failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/templates")
 async def list_templates():

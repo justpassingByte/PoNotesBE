@@ -21,11 +21,12 @@ export class HandController extends BaseController {
     async parseHand(req: Request, res: Response) {
         try {
             const { rawInput, inputType } = req.body;
+            const file = (req as any).file;
             const userId = (req as any).user.id;
             const tier = (req as any).user.premium_tier || 'FREE';
 
-            if (!rawInput) {
-                return res.status(400).json({ success: false, error: 'rawInput is required' });
+            if (!rawInput && !file) {
+                return res.status(400).json({ success: false, error: 'rawInput or file is required' });
             }
 
             // Check OCR quota specifically for images
@@ -40,6 +41,9 @@ export class HandController extends BaseController {
             const result = await this.handService.parseHand({
                 userId,
                 rawInput,
+                fileBytes: file?.buffer,
+                fileName: file?.originalname,
+                mimeType: file?.mimetype,
                 inputType: inputType || 'text',
                 tier
             });

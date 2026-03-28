@@ -7,23 +7,35 @@ const router = Router();
 
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://ocr-api:8000';
 
+import multer from 'multer';
+import FormData from 'form-data';
+
+const upload = multer();
+
 /**
  * POST /api/ocr/feedback
  * 
  * Handles user feedback from the OCR Confirmation / Correction UI.
- * Forwards the action to the OCR service Celery task `apply_feedback`.
+ * Forwards the action to the OCR service /feedback endpoint via multipart/form-data.
  * 
- * Body:
- *   { imageHex: string, cardName: string, action: "confirm"|"edit"|"reject", correctedName?: string, handId?: string }
+ * Body (FormData):
+ *   file: image file
+ *   cardName: string
+ *   action: "confirm"|"edit"|"reject"
+ *   correctedName?: string
+ *   handId?: string
+ *   cardIndex?: string
  */
 router.post(
     '/feedback',
+    upload.single('file'),
     asyncErrorWrapper(async (req: Request, res: Response) => {
-        const { imageHex, cardName, action, correctedName = '', handId, cardIndex } = req.body;
+        const { cardName, action, correctedName = '', handId, cardIndex } = req.body;
+        const file = req.file;
         const userId = (req as any).user?.id || 'system';
 
-        if (!imageHex || !cardName || !action) {
-            return res.status(400).json({ error: 'imageHex, cardName, and action are required.' });
+        if (!file || !cardName || !action) {
+            return res.status(400).json({ error: 'file, cardName, and action are required.' });
         }
 
         if (!['confirm', 'edit', 'reject'].includes(action)) {
@@ -35,25 +47,27 @@ router.post(
         }
 
         try {
-            // Log the feedback event for self-learning tracking
             await LoggerService.log(
                 userId,
                 LogType.OCR_FEEDBACK,
                 action === 'confirm' 
                     ? `Confirmed detection of [${cardName}]`
                     : `Corrected [${cardName}] to [${correctedName}]`,
-                { cardName, action, correctedName, imageHex: imageHex.slice(0, 16) + '...' },
+                { cardName, action, correctedName, fileBytes: file.size },
                 handId
             );
 
             console.log(`[OCR_NEURAL_TRAIN] Transmitting visual map for '${action}'. Card: [${cardName}] -> [${correctedName || ''}] to Core Vision Engine...`);
             
-            const response = await axios.post(`${OCR_SERVICE_URL}/feedback`, {
-                image_hex:      imageHex,
-                card_name:      cardName,
-                action:         action,
-                corrected_name: correctedName,
-                card_index:     cardIndex,
+            const formData = new FormData();
+            formData.append('file', file.buffer, file.originalname || 'feedback.png');
+            formData.append('card_name', cardName);
+            formData.append('action', action);
+            if (correctedName) formData.append('corrected_name', correctedName);
+            if (cardIndex !== undefined) formData.append('card_index', cardIndex);
+            
+            const response = await axios.post(`${OCR_SERVICE_URL}/feedback`, formData, {
+                headers: formData.getHeaders(),
             });
             
             console.log(`[OCR_NEURAL_TRAIN] Vision Engine acknowledged learning for [${correctedName || cardName}]. Cache Updated.`);

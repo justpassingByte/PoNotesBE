@@ -17,13 +17,16 @@ export class HandService {
 
     async parseHand(params: {
         userId: string;
-        rawInput: string;
+        rawInput?: string;
         inputType: 'text' | 'image';
         tier: PremiumTier;
+        fileBytes?: Buffer;
+        fileName?: string;
+        mimeType?: string;
     }): Promise<{ hand: any; fromCache: boolean }> {
         // Always generate unique hash per upload — OCR self-learning means
         // re-processing the same image should yield improved results over time.
-        const hashInput = `${params.userId}:${params.rawInput}:${Date.now()}`;
+        const hashInput = `${params.userId}:${params.rawInput || (params.fileBytes ? params.fileBytes.length : '')}:${Date.now()}`;
         const hash = params.inputType === 'text'
             ? generateHandHash(hashInput)
             : crypto.createHash('sha256').update(hashInput).digest('hex');
@@ -37,7 +40,12 @@ export class HandService {
 
         let parsedData: ParsedHand | null = null;
         if (params.inputType === 'image') {
-            const ocrResponse = await this.ocrParseImage(params.rawInput, params.tier);
+            const ocrResponse = await this.ocrParseImage({
+                imageUrl: params.rawInput,
+                fileBytes: params.fileBytes,
+                fileName: params.fileName,
+                mimeType: params.mimeType
+            }, params.tier);
             const rawData = ocrResponse.data || ocrResponse;
             console.log('\n--- [HandService] RAW OCR DATA RECEIVED ---');
             console.log(JSON.stringify(rawData, null, 2).slice(0, 1500) + '... (truncated)');
@@ -403,25 +411,30 @@ export class HandService {
         return createdNoteIds;
     }
 
-    private async ocrParseImage(imageUrl: string, tier: PremiumTier): Promise<any> {
+    private async ocrParseImage(imgParams: { imageUrl?: string; fileBytes?: Buffer; fileName?: string; mimeType?: string }, tier: PremiumTier): Promise<any> {
         const ocrServiceUrl = process.env.OCR_SERVICE_URL || 'http://ocr-api:8000';
         try {
             let imageBuffer: Buffer;
-            let mimeType = 'image/png';
+            let mimeType = imgParams.mimeType || 'image/png';
 
-            if (imageUrl.startsWith('data:')) {
-                const [header, base64Data] = imageUrl.split(',');
+            if (imgParams.fileBytes) {
+                imageBuffer = imgParams.fileBytes;
+            } else if (imgParams.imageUrl && imgParams.imageUrl.startsWith('data:')) {
+                const [header, base64Data] = imgParams.imageUrl.split(',');
                 mimeType = header.split(':')[1].split(';')[0];
                 imageBuffer = Buffer.from(base64Data, 'base64');
-            } else {
-                const imgRes = await fetch(imageUrl);
+            } else if (imgParams.imageUrl) {
+                const imgRes = await fetch(imgParams.imageUrl);
                 imageBuffer = Buffer.from(await imgRes.arrayBuffer());
                 mimeType = imgRes.headers.get('content-type') || 'image/png';
+            } else {
+                throw new Error('No image context provided for OCR');
             }
 
             const formData = new FormData();
             const blob = new Blob([new Uint8Array(imageBuffer)], { type: mimeType });
-            formData.append('file', blob, `hand.${mimeType.split('/')[1] || 'png'}`);
+            const pFileName = imgParams.fileName || `hand.${mimeType.split('/')[1] || 'png'}`;
+            formData.append('file', blob, pFileName);
 
             // Try synchronous endpoint first (eliminates polling overhead)
             try {
@@ -450,6 +463,10 @@ export class HandService {
             const queueResponse = await axios.post(`${ocrServiceUrl}/ocr`, formData, {
                 headers: { 'Connection': 'close' }
             });
+
+            if (queueResponse.data.status === 'success') {
+                return queueResponse.data.result;
+            }
 
             const { job_id } = queueResponse.data;
             console.log(`[OCR_ENGINE] Sent visual payload. Job ID: ${job_id}. Waiting for core...`);
