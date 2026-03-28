@@ -485,7 +485,7 @@ export class HandService {
 
         const createdNoteIds: string[] = [];
         for (const mistake of allMistakes) {
-            const playerName = mistake.playerName || mistake.player;
+            const playerName = (mistake as any).playerName || mistake.player;
             if (!playerName || !mistake.description) continue;
 
             let player = await prisma.player.findFirst({
