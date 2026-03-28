@@ -201,6 +201,7 @@ model Note {
   street          String
   note_type       String   @default("TEXT")
   content         String
+  metadata        Json?    // Structured context: pot_type, board_bucket, facing, action, severity, etc.
   category        String   @default("GENERAL") // "EXPLOIT" | "LEAK" | "TELL" | "GENERAL"
   source          String   @default("custom")  // "template" | "custom" | "ai"
   is_ai_generated Boolean  @default(false)

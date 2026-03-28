@@ -9,6 +9,7 @@ import { PremiumTier, UsageActionType } from '@prisma/client';
 import { LoggerService, LogType } from './loggerService';
 import OpenAI from 'openai';
 import { PatternEngine } from './analysis/PatternEngine';
+import { BoardBucketParser } from './analysis/context/BoardBucketParser';
 import axios from 'axios';
 export class HandService {
     constructor(
@@ -335,6 +336,150 @@ export class HandService {
         return this.handRepository.delete(userId, id);
     }
 
+    /**
+     * Detect pot type from preflop actions (SRP / 3bet / 4bet / Limped / etc.)
+     */
+    private detectPotType(parsedHand: ParsedHand): string {
+        const preflopActions = parsedHand.actions?.preflop || [];
+        let raiseCount = 0;
+        for (const act of preflopActions) {
+            const a = act.action?.toLowerCase() || '';
+            if (a === 'raise' || a === 'all-in' || a === '3bet' || a === '4bet') raiseCount++;
+        }
+        if (raiseCount === 0) return 'Limped Pot';
+        if (raiseCount === 1) return 'SRP';
+        if (raiseCount === 2) return '3bet Pot';
+        if (raiseCount >= 3) return '4bet+ Pot';
+        return 'SRP';
+    }
+
+    /**
+     * Describe board texture for a specific street using the canonical BoardBucketParser.
+     */
+    private describeBoardTexture(board: string[], street: string): string {
+        if (!board || board.length === 0) return '';
+
+        const suitName = (s: string) => ({ h: '♥', d: '♦', c: '♣', s: '♠' }[s] || s);
+        const formatCard = (c: string) => {
+            if (!c || c === '??') return '?';
+            const rank = c.slice(0, -1).toUpperCase();
+            const suit = c.slice(-1).toLowerCase();
+            return `${rank}${suitName(suit)}`;
+        };
+
+        const streetLow = street.toLowerCase();
+        let relevantCards: string[] = [];
+
+        if (streetLow === 'flop') relevantCards = board.slice(0, 3);
+        else if (streetLow === 'turn') relevantCards = board.slice(0, 4);
+        else if (streetLow === 'river') relevantCards = board.slice(0, 5);
+        else return ''; // preflop, blinds_ante, general — no board to show
+
+        if (relevantCards.length === 0) return '';
+
+        const display = relevantCards.map(formatCard).join(' ');
+
+        // Use canonical BoardBucketParser for texture classification
+        const bucket = BoardBucketParser.categorize(relevantCards);
+        const labels: string[] = [];
+        if (bucket.suitedness !== 'UNKNOWN') labels.push(bucket.suitedness.toLowerCase());
+        if (bucket.connectivity !== 'UNKNOWN' && bucket.connectivity !== 'DISCONNECTED') labels.push(bucket.connectivity.toLowerCase());
+        if (bucket.pairedStatus !== 'UNKNOWN' && bucket.pairedStatus !== 'UNPAIRED') labels.push(bucket.pairedStatus.toLowerCase());
+        if (bucket.highCardTier !== 'UNKNOWN') labels.push(bucket.highCardTier.toLowerCase().replace('_', ' '));
+
+        const textureSuffix = labels.length > 0 ? ` (${labels.join(', ')})` : '';
+        return `[${display}]${textureSuffix}`;
+    }
+
+    /**
+     * Find what action the player actually took on a specific street.
+     */
+    private findPlayerAction(parsedHand: ParsedHand, playerName: string, street: string): string {
+        const streetLow = street.toLowerCase() as keyof ParsedHand['actions'];
+        const actions = parsedHand.actions?.[streetLow] || [];
+        const playerActions = actions.filter(a =>
+            a.player?.toLowerCase() === playerName.toLowerCase()
+        );
+        if (playerActions.length === 0) return '';
+        return playerActions.map(a => {
+            const act = (a.action || '').toUpperCase();
+            return a.amount != null ? `${act} ${a.amount}` : act;
+        }).join(' → ');
+    }
+
+    /**
+     * Find what the player was facing on a specific street (last opponent action before theirs).
+     */
+    private findFacingAction(parsedHand: ParsedHand, playerName: string, street: string): string {
+        const streetLow = street.toLowerCase() as keyof ParsedHand['actions'];
+        const actions = parsedHand.actions?.[streetLow] || [];
+        let lastOpponentAction = '';
+        for (const a of actions) {
+            if (a.player?.toLowerCase() === playerName.toLowerCase()) break;
+            const act = (a.action || '').toUpperCase();
+            lastOpponentAction = a.amount != null ? `${act} ${a.amount}` : act;
+        }
+        return lastOpponentAction;
+    }
+
+    /**
+     * Build a rich, context-packed note from a mistake object + parsed hand data.
+     * Returns both human-readable text AND structured metadata for future analysis.
+     */
+    private buildRichNote(mistake: any, parsedHand: ParsedHand): { content: string; metadata: Record<string, any> } {
+        const potType = this.detectPotType(parsedHand);
+        const streetLow = (mistake.street || 'general').toLowerCase();
+        const streetLabel = streetLow.toUpperCase();
+        const position = mistake.position || '';
+        const playerName = mistake.playerName || mistake.player || '';
+
+        // Board bucket (structured)
+        const board = parsedHand.board || [];
+        let relevantCards: string[] = [];
+        if (streetLow === 'flop') relevantCards = board.slice(0, 3);
+        else if (streetLow === 'turn') relevantCards = board.slice(0, 4);
+        else if (streetLow === 'river') relevantCards = board.slice(0, 5);
+
+        const boardBucket = relevantCards.length >= 3 ? BoardBucketParser.categorize(relevantCards) : null;
+        const boardDisplay = this.describeBoardTexture(board, streetLow);
+
+        // Facing & Action (structured)
+        const facing = this.findFacingAction(parsedHand, playerName, streetLow);
+        const action = this.findPlayerAction(parsedHand, playerName, streetLow);
+        const severity = (mistake.severity || 'minor').toLowerCase();
+
+        // ── Build human-readable text ──
+        const parts: string[] = [];
+        let header = potType;
+        if (boardDisplay) header += `, Board ${boardDisplay}`;
+        header += `, ${streetLabel}`;
+        if (position) header += ` (${position})`;
+        parts.push(header);
+
+        if (facing) parts.push(`Facing: ${facing}`);
+        if (action) parts.push(`Action: ${action}`);
+        parts.push(`❌ [${severity.toUpperCase()}] ${mistake.description}`);
+        if (mistake.better_line) parts.push(`✅ Better: ${mistake.better_line}`);
+        if (mistake.gto_deviation_reason) parts.push(`💡 ${mistake.gto_deviation_reason}`);
+
+        // ── Build structured metadata ──
+        const metadata: Record<string, any> = {
+            pot_type: potType,
+            street: streetLow,
+            position: position || null,
+            board_cards: relevantCards.length > 0 ? relevantCards : null,
+            board_bucket: boardBucket,
+            facing: facing || null,
+            action: action || null,
+            severity,
+            description: mistake.description,
+            better_line: mistake.better_line || null,
+            gto_reason: mistake.gto_deviation_reason || null,
+        };
+
+        return { content: parts.join('\n'), metadata };
+    }
+
     private async autoExtractNotesFromAnalysis(userId: string, hand: any, parsedHand: ParsedHand, analysis: HandAnalysis): Promise<string[]> {
         const heroPlayer = parsedHand.players?.find(p => p.hole_cards && p.hole_cards.length > 0);
         const heroName = heroPlayer?.name?.toLowerCase() || 'hero';
@@ -352,7 +497,7 @@ export class HandService {
             userId,
             LogType.AI_LEARNING,
             `Extracting ${villainMistakes.length} actionable leaks from AI neural output...`,
-            { raw_mistakes: villainMistakes.map(m => m.description) },
+            { raw_mistakes: villainMistakes.map((m: any) => m.description) },
             hand.id
         );
 
@@ -372,13 +517,16 @@ export class HandService {
                 });
             }
 
+            const { content: richContent, metadata } = this.buildRichNote(mistake, parsedHand);
+
             const note = await prisma.note.create({
                 data: {
                     user_id: userId,
                     player_id: player.id,
                     hand_id: hand.id,
                     street: (mistake.street?.toLowerCase() || 'general') as any,
-                    content: `[AI Analysis] ${mistake.description}`,
+                    content: richContent,
+                    metadata,
                     is_ai_generated: true,
                     source: 'ai',
                     category: 'GENERAL',
@@ -390,7 +538,7 @@ export class HandService {
                 userId,
                 LogType.PROFILE_EVOLUTION,
                 `Auto-extracted note for [${playerName}] on street [${mistake.street || 'general'}]. Pushing to Memory Engine...`,
-                { noteId: note.id, content: mistake.description },
+                { noteId: note.id, content: richContent },
                 hand.id
             );
 
