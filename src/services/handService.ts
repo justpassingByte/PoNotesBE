@@ -292,19 +292,7 @@ export class HandService {
             hand.id
         );
 
-        // Clean up previous AI notes for this hand so re-learning is pure
-        const deletedNotes = await prisma.note.deleteMany({
-            where: { hand_id: params.handId, is_ai_generated: true, user_id: params.userId }
-        });
-        if (deletedNotes.count > 0) {
-            await LoggerService.log(
-                params.userId,
-                LogType.SYSTEM,
-                `Wiped ${deletedNotes.count} previous AI notes for this hand. Ready for a clean re-eval.`,
-                { count: deletedNotes.count },
-                hand.id
-            );
-        }
+        // Notes accumulate — previous AI notes are preserved for historical tracking
 
         const analysis = await this.runAnalysis(finalParsedData, params.tier, params.userId);
         await UsageService.incrementUsage(params.userId, UsageActionType.AI_ANALYZE, params.tier);
@@ -519,19 +507,26 @@ export class HandService {
 
             const { content: richContent, metadata } = this.buildRichNote(mistake, parsedHand);
 
-            const note = await prisma.note.create({
-                data: {
+            const baseNoteData: any = {
                     user_id: userId,
                     player_id: player.id,
                     hand_id: hand.id,
                     street: (mistake.street?.toLowerCase() || 'general') as any,
                     content: richContent,
-                    metadata,
                     is_ai_generated: true,
                     source: 'ai',
                     category: 'GENERAL',
-                }
-            });
+                };
+
+            let note: any;
+            try {
+                // Try with metadata first (requires migration applied)
+                note = await prisma.note.create({ data: { ...baseNoteData, metadata } });
+            } catch (metaErr: any) {
+                // Fallback: save without metadata if column doesn't exist yet
+                console.warn('[HandService] Note metadata column not available, saving without it:', metaErr.message?.slice(0, 100));
+                note = await prisma.note.create({ data: baseNoteData });
+            }
             createdNoteIds.push(note.id);
 
             await LoggerService.log(
