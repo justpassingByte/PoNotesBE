@@ -188,16 +188,14 @@ def process_hand_bytes(img_bytes: bytes, image_hash: str):
 
         logger.info(f"[tasks] Decision: {outcome['decision']} | Final conf: {outcome['final']:.3f}")
 
-        # 7. Parallel Per-Region OCR — pot, action_log
+        # 7. Sequential Per-Region OCR — pot, action_log (PaddleOCR is not thread-safe)
         t_ocr_start = time.time()
         ocr_regions = ['pot_area', 'action_log']
         ocr_results = {}  # region_key -> (crop, ocr_result)
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(_ocr_region, img, rk, regions) for rk in ocr_regions]
-            for future in futures:
-                rk, crop, result = future.result()
-                ocr_results[rk] = (crop, result)
+        for rk in ocr_regions:
+            _, crop, result = _ocr_region(img, rk, regions)
+            ocr_results[rk] = (crop, result)
 
         t_ocr = time.time()
         logger.info(f"[tasks] Parallel OCR (pot+action) completed in {(t_ocr - t_ocr_start)*1000:.0f}ms")
