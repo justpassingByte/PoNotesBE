@@ -47,8 +47,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.3'
-          memory: 300M
+          cpus: '1.0'
+          memory: 1500M
     restart: always
 
   # 4. OCR Worker (Heavy Machine Learning Part)
