@@ -84,6 +84,7 @@ def process_hand_bytes(img_bytes: bytes, image_hash: str):
         img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError("Failed to decode image")
+        logger.info(f"[tasks] Image received: {img.shape[1]}x{img.shape[0]} ({len(img_bytes)} bytes)")
 
         # 2. Layout Detection (template-only, no OCR needed)
         match = layout_engine.match_layout(img)

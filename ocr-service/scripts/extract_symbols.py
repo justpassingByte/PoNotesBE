@@ -100,8 +100,7 @@ def main():
 
     screenshots = [
         
-        "ocr1.png",
-        "ocr7.png",
+        "ocr3.png",
     ]
 
     crop_regions = ["board_cards", "showdown_area"]

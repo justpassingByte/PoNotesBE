@@ -205,7 +205,6 @@
         }
       }
     },
-
     {
       "name": "WPT_GLOBAL_MOBILE",
       "site": "wpt_global",
@@ -282,15 +281,6 @@
         }
       }
     }
-
-
-
-
-
-
-
-
-
   ],
   "card_templates": {
     "ranks": [
