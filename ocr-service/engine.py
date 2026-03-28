@@ -199,7 +199,7 @@ class LayoutEngine:
 # ─────────────────────────────────────────────
 
 # Labels that easily raise false positives due to thin/generic shapes
-_PENALIZED_LABELS = frozenset({'7', '1', 'I'})
+_PENALIZED_LABELS = frozenset({'J', 'Q', '7', '1', 'I'})
 
 # Context-specific configuration
 _CONTEXT_CONFIG = {
@@ -529,7 +529,9 @@ class CardDetector:
 
                     # Heart: wider top (more pixels) → top >= bottom
                     # Diamond: narrow top (fewer pixels) → top < bottom
-                    if top_pixels >= bot_pixels * 0.8:
+                    # Use strict ratio (0.95) to avoid false heart classification
+                    # on small cards where shapes are similar
+                    if top_pixels >= bot_pixels:
                         # Shape is heart — suppress the diamond detection
                         to_remove.add(id(d))
                         if h['score'] < d['score']:
