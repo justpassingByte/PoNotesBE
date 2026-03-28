@@ -324,6 +324,14 @@ class CardDetector:
                 # Suit templates — route by filename suffix
                 if '_small' in f:
                     self.suit_templates_small[f] = entry
+                    # Auto-generate inverted variant (white-on-black) for
+                    # loser/showdown cards that render suits as light-on-dark
+                    inv_img = cv2.bitwise_not(img)
+                    inv_scaled = _prescale_template(inv_img)
+                    inv_key = f.replace('_small.png', '_small_inv.png')
+                    self.suit_templates_small[inv_key] = {
+                        'label': label, 'img': inv_img, 'scaled': inv_scaled,
+                    }
                 else:
                     # '_board' or default
                     self.suit_templates_board[f] = entry
@@ -468,6 +476,80 @@ class CardDetector:
                     break
 
         return self._nms(results, iou_threshold=0.2)
+
+    def _disambiguate_red_suits(self, detections, search_images):
+        """When heart and diamond detections overlap, keep only the correct one
+        based on actual pixel shape in the top half of the bounding box."""
+        if not search_images:
+            return detections
+
+        # Group by approximate center position
+        red_suits = {'heart': [], 'diamond': []}
+        others = []
+        for d in detections:
+            if d['label'] in red_suits:
+                red_suits[d['label']].append(d)
+            else:
+                others.append(d)
+
+        if not red_suits['heart'] or not red_suits['diamond']:
+            return detections  # No ambiguity
+
+        # For each heart detection, check if a diamond overlaps at same position
+        to_remove = set()
+        for h in red_suits['heart']:
+            h_cx = h['x'] + h['w'] * 0.5
+            h_cy = h['y'] + h['h'] * 0.5
+            for d_idx, d in enumerate(red_suits['diamond']):
+                d_cx = d['x'] + d['w'] * 0.5
+                d_cy = d['y'] + d['h'] * 0.5
+                # Check if they overlap (centers within 30px)
+                if abs(h_cx - d_cx) < 30 and abs(h_cy - d_cy) < 30:
+                    # Use the first (binary) search image for shape analysis
+                    img = search_images[0]
+                    # Use the larger bounding box for analysis
+                    x = min(h['x'], d['x'])
+                    y = min(h['y'], d['y'])
+                    w = max(h['x'] + h['w'], d['x'] + d['w']) - x
+                    hh = max(h['y'] + h['h'], d['y'] + d['h']) - y
+
+                    if y + hh > img.shape[0] or x + w > img.shape[1]:
+                        continue
+
+                    roi = img[y:y + hh, x:x + w]
+                    if roi.size == 0:
+                        continue
+
+                    # Compare pixel density in top-third vs bottom-third
+                    third = max(1, hh // 3)
+                    top_pixels = np.count_nonzero(roi[:third, :])
+                    bot_pixels = np.count_nonzero(roi[-third:, :])
+
+                    # Heart: wider top (more pixels) → top >= bottom
+                    # Diamond: narrow top (fewer pixels) → top < bottom
+                    if top_pixels >= bot_pixels * 0.8:
+                        # Shape is heart — suppress the diamond detection
+                        to_remove.add(id(d))
+                        if h['score'] < d['score']:
+                            h['score'] = d['score']  # Keep best score
+                        logger.debug(
+                            f"  [Disambiguate] heart wins over diamond at ({x},{y}) "
+                            f"top_px={top_pixels} bot_px={bot_pixels}"
+                        )
+                    else:
+                        # Shape is likely diamond — suppress the heart
+                        to_remove.add(id(h))
+                        logger.debug(
+                            f"  [Disambiguate] diamond wins over heart at ({x},{y}) "
+                            f"top_px={top_pixels} bot_px={bot_pixels}"
+                        )
+
+        # Rebuild list without suppressed detections
+        result = others[:]
+        for d in red_suits['heart'] + red_suits['diamond']:
+            if id(d) not in to_remove:
+                result.append(d)
+        return result
 
     def _handle_failed_case(self, board_img, paired_cards, ranks, suits, context, is_reliable):
         """Save debug data when detection confidence is low."""
@@ -712,20 +794,25 @@ class CardDetector:
         )
 
         # ── Phase 3: River board-template fallback ──
-        # Only run if edge+binarize still didn't find enough suits
-        if not is_board and self.suit_templates_board and len(suits) < 2:
+        # Run if there are more ranks than suits — meaning some ranks have no paired suit
+        if not is_board and self.suit_templates_board and len(suits) < len(ranks):
             suits_fallback = self._detect_symbols(
                 gray, self.suit_templates_board,
-                threshold=suit_threshold,
+                threshold=max(suit_threshold - 0.05, 0.60),
                 scales=cfg["fallback_scales"],
                 search_images=search_images,
             )
             if suits_fallback:
                 logger.debug(
                     f"[CardDetector] river fallback: {len(suits_fallback)} extra suit hits "
-                    f"from board templates"
+                    f"from board templates (had {len(suits)} suits for {len(ranks)} ranks)"
                 )
                 suits = self._nms(suits + suits_fallback, iou_threshold=0.2)
+
+        # Heart-Diamond disambiguation — only for non-board (river/showdown)
+        # Board cards have correct rendering, disambiguation would corrupt them.
+        if not is_board:
+            suits = self._disambiguate_red_suits(suits, search_images)
 
         # Apply color-based suit filtering
         suits = self._filter_suits_by_color(suits, board_img)
