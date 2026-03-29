@@ -354,7 +354,7 @@ export class DesktopController extends BaseController {
                 playstyle: p.playstyle,
                 aiProfile: p.ai_profile,
                 notes: p.notes?.map((n: any) => n.content) || [],
-                mockStrategy: generateStrategy(p),
+                strategy: generateStrategy(p),
             }));
 
             res.json(data);

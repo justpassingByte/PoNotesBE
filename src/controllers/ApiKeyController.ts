@@ -62,6 +62,7 @@ export class ApiKeyController extends BaseController {
         }
     }
 
+
     /**
      * DELETE /api/api-keys/:id
      * Revoke an API key.

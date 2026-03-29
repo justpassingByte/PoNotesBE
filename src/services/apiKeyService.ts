@@ -33,6 +33,15 @@ export class ApiKeyService {
             throw new Error('Your subscription has expired. Please renew to generate API keys.');
         }
 
+        // Enforce 1 active key limit
+        const activeKeysCount = await prisma.apiKey.count({
+            where: { user_id: userId, is_active: true }
+        });
+        
+        if (activeKeysCount >= 1) {
+            throw new Error('You can only have 1 active API key at a time. Please delete your existing key first.');
+        }
+
         // Generate secure random key
         const rawKeyBody = crypto.randomBytes(32).toString('hex');
         const rawKey = `${API_KEY_PREFIX}${rawKeyBody}`;
