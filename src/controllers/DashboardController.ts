@@ -34,8 +34,17 @@ export class DashboardController {
             // 2. Fetch fresh data using parallel queries if not cached
             const where = { user_id: userId };
             
-            // We need: totalCount, totalNotesCount, playstyles, and specifically Weak targets
-            const [totalCount, totalNotesCount, playstyles, weakTargets, strongTargets] = await Promise.all([
+            // We need: totalCount, totalNotesCount, playstyles, weak targets, hands analyzed, AI vs Manual notes
+            const [
+                totalCount, 
+                totalNotesCount, 
+                playstyles, 
+                weakTargets, 
+                strongTargets,
+                totalHands,
+                aiNotesCount,
+                manualNotesCount
+            ] = await Promise.all([
                 prisma.player.count({ where }),
                 prisma.note.count({ where }),
                 prisma.player.groupBy({
@@ -68,7 +77,10 @@ export class DashboardController {
                     },
                     orderBy: { notes: { _count: 'desc' } }, // Experienced/Active regs
                     take: 20
-                })
+                }),
+                prisma.hand.count({ where }),
+                prisma.note.count({ where: { ...where, is_ai_generated: true } }),
+                prisma.note.count({ where: { ...where, is_ai_generated: false } })
             ]);
 
             // Combine stats
@@ -120,6 +132,9 @@ export class DashboardController {
                     totalCount,
                     totalNotesCount,
                     playstyleCounts,
+                    totalHands,
+                    aiNotesCount,
+                    manualNotesCount
                 },
                 topWhales: topWhales.map(formatPlayer),
                 topRegs: topRegs.map(formatPlayer)

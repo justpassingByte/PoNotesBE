@@ -325,11 +325,7 @@ export class DesktopController extends BaseController {
                 include: {
                     stats: true,
                     platform: true,
-                    notes: {
-                        where: { user_id: userId },
-                        orderBy: { created_at: 'desc' },
-                        take: 5,
-                    },
+                    _count: { select: { notes: true } },
                 },
             });
 
@@ -353,7 +349,7 @@ export class DesktopController extends BaseController {
                 platform: p.platform?.name || 'Unknown',
                 playstyle: p.playstyle,
                 aiProfile: p.ai_profile,
-                notes: p.notes?.map((n: any) => n.content) || [],
+                notesCount: p._count?.notes ?? 0,
                 strategy: generateStrategy(p),
             }));
 
@@ -367,34 +363,43 @@ export class DesktopController extends BaseController {
 function generateStrategy(p: any): string {
     const parts = [];
 
-    // 1. User Notes (Những cái note của user)
-    if (p.notes && p.notes.length > 0) {
-        parts.push("📝 GHI CHÚ CỦA BẠN:");
-        p.notes.forEach((n: any, i: number) => {
-            parts.push(`- ${n.content}`);
-        });
-        parts.push(""); // Spacer
-    }
-    
-    // 2. AI Notes / Exploits (AI note)
     if (p.ai_profile && typeof p.ai_profile === 'object') {
-        const exploits = p.ai_profile.exploits || [];
-        if (exploits.length > 0) {
-            parts.push("🤖 AI ANALYSIS (EXPLOITS):");
-            exploits.forEach((exp: string) => {
-                parts.push(`💡 ${exp}`);
+        const leaks = p.ai_profile.leaks || [];
+        if (leaks.length > 0) {
+            parts.push("Core Leaks");
+            leaks.forEach((leak: string) => {
+                parts.push(`- ${leak}`);
             });
-            parts.push(""); // Spacer
+            parts.push("");
+        }
+
+        const strategyList = p.ai_profile.strategy || [];
+        if (strategyList.length > 0) {
+            parts.push("Core Exploit Strategy");
+            strategyList.forEach((st: any) => {
+                parts.push(st.node || "UNKNOWN NODE");
+                parts.push("Action");
+                parts.push(st.action || "N/A");
+                parts.push("Range");
+                parts.push(st.range || "N/A");
+                parts.push("Structure");
+                parts.push(st.structure || "N/A");
+                parts.push("Sizing / Freq");
+                parts.push(`${st.sizing || "null"} (${st.frequency || "100%"})`);
+                parts.push(""); // spacer between nodes
+            });
         }
     }
 
-    // 3. Playstyle if no other notes
-    if (parts.length === 0 && p.playstyle && p.playstyle !== 'UNKNOWN') {
-        parts.push(`Lối chơi chủ đạo: ${p.playstyle}`);
+    // Fallback if no AI profile yet
+    if (parts.length === 0) {
+        if (p.playstyle && p.playstyle !== 'UNKNOWN') {
+            parts.push(`Lối chơi chủ đạo: ${p.playstyle}`);
+        } else {
+            return "Chưa có dữ liệu - Hãy phân tích thêm!";
+        }
     }
-    
-    if (parts.length === 0) return "Chưa có dữ liệu - Hãy phân tích thêm!";
-    
+
     // Clean up trailing spacers
     while (parts.length > 0 && parts[parts.length - 1] === "") {
         parts.pop();
