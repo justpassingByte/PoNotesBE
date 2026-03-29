@@ -366,20 +366,39 @@ export class DesktopController extends BaseController {
 
 function generateStrategy(p: any): string {
     const parts = [];
-    if (p.playstyle && p.playstyle !== 'UNKNOWN') {
-        parts.push(`Lối chơi: ${p.playstyle}`);
+
+    // 1. User Notes (Những cái note của user)
+    if (p.notes && p.notes.length > 0) {
+        parts.push("📝 GHI CHÚ CỦA BẠN:");
+        p.notes.forEach((n: any, i: number) => {
+            parts.push(`- ${n.content}`);
+        });
+        parts.push(""); // Spacer
     }
     
-    if (p.notes && p.notes.length > 0) {
-        parts.push(`Note: ${p.notes[0].content}`);
+    // 2. AI Notes / Exploits (AI note)
+    if (p.ai_profile && typeof p.ai_profile === 'object') {
+        const exploits = p.ai_profile.exploits || [];
+        if (exploits.length > 0) {
+            parts.push("🤖 AI ANALYSIS (EXPLOITS):");
+            exploits.forEach((exp: string) => {
+                parts.push(`💡 ${exp}`);
+            });
+            parts.push(""); // Spacer
+        }
     }
 
-    if (p.ai_profile && typeof p.ai_profile === 'object') {
-        if (p.ai_profile.exploits && p.ai_profile.exploits.length > 0) {
-            parts.push(`💡 ${p.ai_profile.exploits[0]}`);
-        }
+    // 3. Playstyle if no other notes
+    if (parts.length === 0 && p.playstyle && p.playstyle !== 'UNKNOWN') {
+        parts.push(`Lối chơi chủ đạo: ${p.playstyle}`);
     }
     
     if (parts.length === 0) return "Chưa có dữ liệu - Hãy phân tích thêm!";
+    
+    // Clean up trailing spacers
+    while (parts.length > 0 && parts[parts.length - 1] === "") {
+        parts.pop();
+    }
+
     return parts.join("\n");
 }
