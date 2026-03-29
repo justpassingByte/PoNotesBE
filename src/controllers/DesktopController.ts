@@ -325,6 +325,12 @@ export class DesktopController extends BaseController {
                 include: {
                     stats: true,
                     platform: true,
+                    notes: {
+                        where: { is_ai_generated: false },
+                        orderBy: { created_at: 'desc' },
+                        take: 20,
+                        select: { content: true, category: true, street: true, created_at: true },
+                    },
                     _count: { select: { notes: true } },
                 },
             });
@@ -346,10 +352,16 @@ export class DesktopController extends BaseController {
                 foldToSteal: p.stats?.fold_to_steal ?? 0,
                 aggPct: p.stats?.aggression_freq ?? 0,
                 checkRaisePct: p.stats?.check_raise ?? 0,
+                fourBet: p.stats?.four_bet ?? 0,
+                foldToFourBet: p.stats?.fold_to_4bet ?? 0,
+                foldToCheckRaise: p.stats?.fold_to_check_raise ?? 0,
+                stabPct: p.stats?.stab ?? 0,
+                floatPct: p.stats?.float_pct ?? 0,
                 platform: p.platform?.name || 'Unknown',
                 playstyle: p.playstyle,
                 aiProfile: p.ai_profile,
                 notesCount: p._count?.notes ?? 0,
+                manualNotes: (p.notes || []).map((n: any) => n.content),
                 strategy: generateStrategy(p),
             }));
 

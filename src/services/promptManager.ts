@@ -114,7 +114,7 @@ ${style === 'Exploit' ? `You are in EXPLOIT mode.
 2. ALL PLAYERS EQUAL: Analyze mistakes and leaks for EVERY player equally. Do NOT distinguish between "Hero" and "Villain". Report each player by their actual username.
 3. EXPLOIT_VALIDATION: exploit_suggestions MUST be actionable strategies to use against specific players' leaks found in this hand.
 4. SIZING_VALIDATION: Fold/Call actions must have sizing=null.
-5. LANGUAGE_VALIDATION: ${settings?.language === 'vi' ? 'Respond strictly in Vietnamese (vi), but retain standard Poker acronyms (BTN, XR, AQo, etc.) in English.' : 'Respond in English.'}
+5. LANGUAGE_VALIDATION: ${settings?.language === 'vi' ? 'Respond strictly in Vietnamese (vi), but retain standard Poker acronyms (BTN, XR, AQo, etc.) and action verbs (call, fold, raise, bet, check, all-in, 3bet, 4bet) in English. ABSOLUTELY DO NOT translate "call" to "gọi", "fold" to "bỏ", "raise" to "tố", etc.' : 'Respond in English.'}
 `;
 
   const customBase = customPrompt ? `### USER-DEFINED INSTRUCTIONS:\n${customPrompt}\n` : "";
@@ -294,7 +294,7 @@ Requirements:
 - If JSON is invalid → REWRITE entire response.
 
 ### 8. LANGUAGE VALIDATION (MANDATORY)
-${settings?.language === 'vi' ? 'Respond strictly in Vietnamese (vi), but retain standard Poker acronyms (BTN, XR, AQo, etc.) in English.' : 'Respond in English.'}
+${settings?.language === 'vi' ? 'Respond strictly in Vietnamese (vi), but retain standard Poker acronyms (BTN, XR, AQo, etc.) and action verbs (call, fold, raise, bet, check, all-in, 3bet, 4bet) in English. ABSOLUTELY DO NOT translate "call" to "gọi", "fold" to "bỏ", "raise" to "tố", etc.' : 'Respond in English.'}
 `;
 
   const schemaBlock = `
