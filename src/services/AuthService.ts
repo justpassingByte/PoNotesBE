@@ -72,8 +72,8 @@ export class AuthService {
             throw new Error('Invalid credentials');
         }
 
-        // Check email verification
-        if (!user.email_verified) {
+        // Check email verification (Admins are exempt)
+        if (!user.email_verified && !user.is_admin) {
             const error: any = new Error('Please verify your email before logging in. Check your inbox.');
             error.code = 'EMAIL_NOT_VERIFIED';
             throw error;
