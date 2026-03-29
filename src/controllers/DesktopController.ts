@@ -325,6 +325,11 @@ export class DesktopController extends BaseController {
                 include: {
                     stats: true,
                     platform: true,
+                    notes: {
+                        where: { user_id: userId },
+                        orderBy: { created_at: 'desc' },
+                        take: 5,
+                    },
                 },
             });
 
@@ -347,6 +352,9 @@ export class DesktopController extends BaseController {
                 checkRaisePct: p.stats?.check_raise ?? 0,
                 platform: p.platform?.name || 'Unknown',
                 playstyle: p.playstyle,
+                aiProfile: p.ai_profile,
+                notes: p.notes?.map((n: any) => n.content) || [],
+                mockStrategy: generateStrategy(p),
             }));
 
             res.json(data);
@@ -354,4 +362,24 @@ export class DesktopController extends BaseController {
             this.handleError(error, res, 'DesktopController.searchPlayers');
         }
     }
+}
+
+function generateStrategy(p: any): string {
+    const parts = [];
+    if (p.playstyle && p.playstyle !== 'UNKNOWN') {
+        parts.push(`Lối chơi: ${p.playstyle}`);
+    }
+    
+    if (p.notes && p.notes.length > 0) {
+        parts.push(`Note: ${p.notes[0].content}`);
+    }
+
+    if (p.ai_profile && typeof p.ai_profile === 'object') {
+        if (p.ai_profile.exploits && p.ai_profile.exploits.length > 0) {
+            parts.push(`💡 ${p.ai_profile.exploits[0]}`);
+        }
+    }
+    
+    if (parts.length === 0) return "Chưa có dữ liệu - Hãy phân tích thêm!";
+    return parts.join("\n");
 }
