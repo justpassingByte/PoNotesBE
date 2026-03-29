@@ -69,7 +69,7 @@ export class ApiKeyController extends BaseController {
     async revoke(req: Request, res: Response) {
         try {
             const user = (req as any).user;
-            const keyId = req.params.id;
+            const keyId = req.params.id as string;
 
             await ApiKeyService.revokeKey(keyId, user.id);
             this.handleSuccess(res, { message: 'API key revoked' });
@@ -85,7 +85,8 @@ export class ApiKeyController extends BaseController {
     async removeDevice(req: Request, res: Response) {
         try {
             const user = (req as any).user;
-            const { id: keyId, deviceId } = req.params;
+            const keyId = req.params.id as string;
+            const deviceId = req.params.deviceId as string;
 
             await ApiKeyService.removeDevice(keyId, deviceId, user.id);
             this.handleSuccess(res, { message: 'Device removed' });
@@ -101,7 +102,7 @@ export class ApiKeyController extends BaseController {
     async deleteKey(req: Request, res: Response) {
         try {
             const user = (req as any).user;
-            const keyId = req.params.id;
+            const keyId = req.params.id as string;
 
             await ApiKeyService.deleteKey(keyId, user.id);
             this.handleSuccess(res, { message: 'API key deleted permanently' });

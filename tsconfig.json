@@ -3,6 +3,7 @@
   "compilerOptions": {
     "target": "es2022",
     "esModuleInterop": true,
+    "skipLibCheck": true,
     "module": "commonjs", /* Specify what module code is generated. */
     // "rootDir": "./",                                  /* Specify the root folder within your source files. */
     "moduleResolution": "node", /* Specify how TypeScript looks up a file from a given module specifier. */
