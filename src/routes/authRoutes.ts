@@ -11,6 +11,10 @@ const controller = new AuthController();
  */
 router.post('/register', asyncErrorWrapper((req, res) => controller.register(req, res)));
 router.post('/login', asyncErrorWrapper((req, res) => controller.login(req, res)));
+router.get('/verify-email', asyncErrorWrapper((req, res) => controller.verifyEmail(req, res)));
+router.post('/resend-verification', asyncErrorWrapper((req, res) => controller.resendVerification(req, res)));
+router.post('/forgot-password', asyncErrorWrapper((req, res) => controller.forgotPassword(req, res)));
+router.post('/reset-password', asyncErrorWrapper((req, res) => controller.resetPassword(req, res)));
 
 /**
  * Protected Routes (Require Authentication)

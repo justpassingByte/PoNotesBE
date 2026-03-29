@@ -22,6 +22,8 @@ import { adminRoutes } from './routes/adminRoutes';
 import usageRoutes from './routes/usageRoutes';
 import { ocrRoutes } from './routes/ocrRoutes';
 import { userRoutes } from './routes/userRoutes';
+import { apiKeyRoutes } from './routes/apiKeyRoutes';
+import { desktopRoutes } from './routes/desktopRoutes';
 import cookieParser from 'cookie-parser';
 import { authMiddleware } from './middleware/authMiddleware';
 
@@ -84,6 +86,9 @@ app.use('/api/auth', authRoutes);
 // Payment routes (Self-managed: webhook is public, others are private)
 app.use('/api/payments', paymentRoutes);
 
+// Desktop app routes (uses own apiKeyMiddleware, must be before authMiddleware)
+app.use('/api/desktop', desktopRoutes);
+
 
 // All other /api routes require authentication
 app.use('/api', authMiddleware);
@@ -108,6 +113,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/usage', usageRoutes);
 app.use('/api/ocr', ocrRoutes);
+app.use('/api/api-keys', apiKeyRoutes);
 
 // Global Error Handler
 app.use(errorHandler);

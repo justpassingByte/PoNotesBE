@@ -8,7 +8,7 @@ const router = Router();
 router.get('/:playerId/stats', asyncErrorWrapper(async (req, res) => {
     const playerId = req.params.playerId as string;
 
-    let stats = await prisma.playerStats.findUnique({
+    let stats: any = await prisma.playerStats.findUnique({
         where: { player_id: playerId }
     });
 
@@ -27,6 +27,10 @@ router.get('/:playerId/stats', asyncErrorWrapper(async (req, res) => {
             wtsd: null,
             wsd: null,
             aggression_freq: null,
+            steal: null,
+            fold_to_steal: null,
+            check_raise: null,
+            total_hands: null,
         };
     }
 
@@ -45,17 +49,26 @@ router.put('/:playerId/stats', asyncErrorWrapper(async (req, res) => {
 
     const {
         vpip, rfi, pfr, three_bet, fold_to_3bet,
-        cbet, fold_to_cbet, wtsd, wsd, aggression_freq
+        cbet, fold_to_cbet, wtsd, wsd, aggression_freq,
+        steal, fold_to_steal, check_raise, total_hands
     } = req.body;
 
-    // Validate: all values must be null, undefined, or a number 0-100
-    const fields = { vpip, rfi, pfr, three_bet, fold_to_3bet, cbet, fold_to_cbet, wtsd, wsd, aggression_freq };
-    for (const [key, val] of Object.entries(fields)) {
+    // Validate: percentage values must be null, undefined, or a number 0-100
+    const pctFields = { vpip, rfi, pfr, three_bet, fold_to_3bet, cbet, fold_to_cbet, wtsd, wsd, aggression_freq, steal, fold_to_steal, check_raise };
+    for (const [key, val] of Object.entries(pctFields)) {
         if (val !== null && val !== undefined) {
             const num = Number(val);
             if (isNaN(num) || num < 0 || num > 100) {
                 return res.status(400).json({ success: false, error: `${key} must be a number between 0 and 100` });
             }
+        }
+    }
+
+    // Validate total_hands (integer, no upper bound)
+    if (total_hands !== null && total_hands !== undefined) {
+        const num = Number(total_hands);
+        if (isNaN(num) || num < 0 || !Number.isInteger(num)) {
+            return res.status(400).json({ success: false, error: 'total_hands must be a non-negative integer' });
         }
     }
 
@@ -70,6 +83,10 @@ router.put('/:playerId/stats', asyncErrorWrapper(async (req, res) => {
         wtsd: wtsd != null ? Number(wtsd) : null,
         wsd: wsd != null ? Number(wsd) : null,
         aggression_freq: aggression_freq != null ? Number(aggression_freq) : null,
+        steal: steal != null ? Number(steal) : null,
+        fold_to_steal: fold_to_steal != null ? Number(fold_to_steal) : null,
+        check_raise: check_raise != null ? Number(check_raise) : null,
+        total_hands: total_hands != null ? Number(total_hands) : null,
     };
 
     const stats = await prisma.playerStats.upsert({

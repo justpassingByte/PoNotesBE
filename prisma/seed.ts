@@ -13,14 +13,16 @@ async function main() {
         update: { 
             password: adminPassword,
             premium_tier: 'PRO_PLUS',
-            is_admin: true
+            is_admin: true,
+            email_verified: true
         },
         create: {
             email: 'admin',
             password: adminPassword,
             premium_tier: 'PRO_PLUS',
             max_devices: 5,
-            is_admin: true
+            is_admin: true,
+            email_verified: true
         }
     });
     console.log('Created/Updated admin user.');

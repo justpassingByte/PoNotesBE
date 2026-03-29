@@ -19,5 +19,9 @@ export const config = {
     },
     frontend: {
         url: process.env.FRONTEND_URL || 'http://localhost:3000',
-    }
+    },
+    email: {
+        resendApiKey: process.env.RESEND_API_KEY || '',
+        from: process.env.EMAIL_FROM || 'VillainVault <noreply@villainvault.com>',
+    },
 };

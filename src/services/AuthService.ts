@@ -1,14 +1,15 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid';
+import { EmailService } from './emailService';
 
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'villainvault-super-secret-key';
 
 export class AuthService {
     /**
-     * Register a new user
+     * Register a new user — sends verification email, does NOT auto-login.
      */
     static async register(email: string, password: string) {
         const existing = await prisma.user.findUnique({
@@ -20,13 +21,23 @@ export class AuthService {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        
+        const verifyToken = crypto.randomBytes(32).toString('hex');
+        const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
         const user = await prisma.user.create({
             data: {
                 email,
                 password: hashedPassword,
-                premium_tier: 'FREE' // default tier
+                premium_tier: 'FREE',
+                email_verified: false,
+                email_verify_token: verifyToken,
+                email_verify_expires: verifyExpires,
             }
+        });
+
+        // Send verification email (fire and forget — don't block registration)
+        EmailService.sendVerificationEmail(email, verifyToken).catch(err => {
+            console.error('[AuthService] Failed to send verification email:', err.message);
         });
 
         return user;
@@ -59,6 +70,13 @@ export class AuthService {
 
         if (!user) {
             throw new Error('Invalid credentials');
+        }
+
+        // Check email verification
+        if (!user.email_verified) {
+            const error: any = new Error('Please verify your email before logging in. Check your inbox.');
+            error.code = 'EMAIL_NOT_VERIFIED';
+            throw error;
         }
 
         // --- Subscription Guard: Auto-Degrade ---
@@ -104,6 +122,116 @@ export class AuthService {
         const token = this.generateToken(user, session);
 
         return { token, user: { id: user.id, email: user.email, tier: user.premium_tier, language: user.language } };
+    }
+
+    /**
+     * Verify email with token
+     */
+    static async verifyEmail(token: string) {
+        const user = await prisma.user.findUnique({
+            where: { email_verify_token: token }
+        });
+
+        if (!user) {
+            throw new Error('Invalid verification token');
+        }
+
+        if (user.email_verify_expires && new Date() > new Date(user.email_verify_expires)) {
+            throw new Error('Verification token has expired. Please request a new one.');
+        }
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                email_verified: true,
+                email_verify_token: null,
+                email_verify_expires: null,
+            }
+        });
+
+        return { email: user.email };
+    }
+
+    /**
+     * Resend verification email
+     */
+    static async resendVerification(email: string) {
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user) {
+            // Don't reveal whether email exists
+            return;
+        }
+
+        if (user.email_verified) {
+            throw new Error('Email is already verified');
+        }
+
+        const verifyToken = crypto.randomBytes(32).toString('hex');
+        const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                email_verify_token: verifyToken,
+                email_verify_expires: verifyExpires,
+            }
+        });
+
+        await EmailService.sendVerificationEmail(email, verifyToken);
+    }
+
+    /**
+     * Request password reset — sends reset email
+     */
+    static async requestPasswordReset(email: string) {
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user) {
+            // Don't reveal whether email exists — silently succeed
+            return;
+        }
+
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                reset_token: resetToken,
+                reset_token_expires: resetExpires,
+            }
+        });
+
+        await EmailService.sendPasswordResetEmail(email, resetToken);
+    }
+
+    /**
+     * Reset password with token
+     */
+    static async resetPassword(token: string, newPassword: string) {
+        const user = await prisma.user.findUnique({
+            where: { reset_token: token }
+        });
+
+        if (!user) {
+            throw new Error('Invalid or expired reset token');
+        }
+
+        if (user.reset_token_expires && new Date() > new Date(user.reset_token_expires)) {
+            throw new Error('Reset token has expired. Please request a new one.');
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                password: hashedPassword,
+                reset_token: null,
+                reset_token_expires: null,
+            }
+        });
+
+        return { email: user.email };
     }
 
     /**

@@ -41,15 +41,20 @@ enum UsageActionType {
 // ─── User & Account ─────────────────────────────────────────────────────────
 
 model User {
-  id                  String      @id @default(uuid())
-  email               String      @unique
-  password            String      @default("$2b$10$wzN27C5fWn8.fC/O8v.7.OWY4uNfF/0uO2O8O8O8O8O8O8O8O8O8O") // Default 'admin' hashed for seeding
-  premium_tier        PremiumTier @default(FREE)
-  is_admin            Boolean     @default(false)
-  subscription_expiry DateTime?
-  max_devices         Int         @default(2)
-  language            String      @default("en") // "en" | "vi"
-  created_at          DateTime    @default(now())
+  id                   String      @id @default(uuid())
+  email                String      @unique
+  password             String      @default("$2b$10$wzN27C5fWn8.fC/O8v.7.OWY4uNfF/0uO2O8O8O8O8O8O8O8O8O8O") // Default 'admin' hashed for seeding
+  premium_tier         PremiumTier @default(FREE)
+  is_admin             Boolean     @default(false)
+  subscription_expiry  DateTime?
+  max_devices          Int         @default(2)
+  language             String      @default("en") // "en" | "vi"
+  email_verified       Boolean     @default(false)
+  email_verify_token   String?     @unique
+  email_verify_expires DateTime?
+  reset_token          String?     @unique
+  reset_token_expires  DateTime?
+  created_at           DateTime    @default(now())
 
   sessions    Session[]
   usages      UserUsage[]
@@ -59,6 +64,7 @@ model User {
   notes       Note[]        @relation("UserNotes")
   aiConfig    UserAIConfig?
   system_logs SystemLog[]
+  api_keys    ApiKey[]
 }
 
 model UserAIConfig {
@@ -128,6 +134,39 @@ model UserUsage {
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, action_type, period_start])
+}
+
+// ─── API Keys (Desktop App) ──────────────────────────────────────────────────
+
+model ApiKey {
+  id           String    @id @default(uuid())
+  user_id      String
+  key_hash     String    @unique    // SHA-256 hash of the raw key
+  key_prefix   String               // First 8 chars for display (e.g., "pk_a1b2...")
+  name         String    @default("Desktop App")
+  is_active    Boolean   @default(true)
+  last_used_at DateTime?
+  created_at   DateTime  @default(now())
+
+  user    User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  devices ApiKeyDevice[]
+
+  @@index([user_id])
+}
+
+model ApiKeyDevice {
+  id          String   @id @default(uuid())
+  api_key_id  String
+  device_id   String              // Hardware fingerprint from desktop app
+  device_name String?             // e.g., "DESKTOP-ABC123"
+  ip_address  String?
+  last_used   DateTime @default(now())
+  created_at  DateTime @default(now())
+
+  apiKey ApiKey @relation(fields: [api_key_id], references: [id], onDelete: Cascade)
+
+  @@unique([api_key_id, device_id])
+  @@index([api_key_id])
 }
 
 // ─── Poker Data ──────────────────────────────────────────────────────────────
@@ -258,6 +297,10 @@ model PlayerStats {
   wtsd            Float?
   wsd             Float?
   aggression_freq Float?
+  steal           Float?
+  fold_to_steal   Float?
+  check_raise     Float?
+  total_hands     Int?
 
   player Player @relation(fields: [player_id], references: [id])
 }
