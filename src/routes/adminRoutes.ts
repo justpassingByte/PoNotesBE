@@ -184,7 +184,7 @@ router.get('/stats', isAdmin, asyncErrorWrapper(async (req, res) => {
 
 // GET /api/admin/users - List users with filters
 router.get('/users', isAdmin, asyncErrorWrapper(async (req, res) => {
-    const { tier, status, search } = req.query;
+    const { tier, status, search, verified } = req.query;
     
     const where: any = {};
     
@@ -200,6 +200,12 @@ router.get('/users', isAdmin, asyncErrorWrapper(async (req, res) => {
             where.subscription_expiry = { gte: new Date() };
         }
     }
+
+    if (verified === 'true') {
+        where.email_verified = true;
+    } else if (verified === 'false') {
+        where.email_verified = false;
+    }
     
     if (search) {
         where.email = { contains: search as string, mode: 'insensitive' };
@@ -210,6 +216,7 @@ router.get('/users', isAdmin, asyncErrorWrapper(async (req, res) => {
         select: {
             id: true,
             email: true,
+            email_verified: true,
             premium_tier: true,
             is_admin: true,
             subscription_expiry: true,
@@ -217,12 +224,19 @@ router.get('/users', isAdmin, asyncErrorWrapper(async (req, res) => {
             _count: { select: { hands: true } },
             usages: {
                 orderBy: { period_start: 'desc' },
-                take: 5 
+                take: 1
             }
         },
         orderBy: { created_at: 'desc' }
     });
     res.json({ success: true, data: users });
+}));
+
+// DELETE /api/admin/users/:id - Delete a user
+router.delete('/users/:id', isAdmin, asyncErrorWrapper(async (req, res) => {
+    const { id } = req.params;
+    await (prisma.user as any).delete({ where: { id } });
+    res.json({ success: true, message: 'User deleted successfully' });
 }));
 
 // GET /api/admin/revenue - Monthly revenue chart data
