@@ -186,20 +186,48 @@ export class DesktopController extends BaseController {
             let notesProcessed = 0;
             let statsProcessed = 0;
 
-            // 1. Process action events (player stat increments)
+            // Helper: Find or create player by name
+            const findOrCreatePlayer = async (playerName: string) => {
+                if (!playerName || playerName.startsWith('unknown_seat_')) return null;
+
+                let player = await prisma.player.findFirst({
+                    where: {
+                        user_id: userId,
+                        name: { equals: playerName, mode: 'insensitive' as const },
+                    },
+                });
+
+                if (!player) {
+                    // Get or create default platform
+                    let platform = await prisma.platform.findFirst({
+                        where: { name: 'Desktop HUD' },
+                    });
+                    if (!platform) {
+                        platform = await prisma.platform.create({
+                            data: { name: 'Desktop HUD' },
+                        });
+                    }
+
+                    player = await prisma.player.create({
+                        data: {
+                            user_id: userId,
+                            platform_id: platform.id,
+                            name: playerName,
+                            playstyle: 'UNKNOWN',
+                        },
+                    });
+                    console.log(`[DesktopSync] Auto-created player: ${playerName}`);
+                }
+
+                return player;
+            };
+
+            // 1. Process action events
             if (events && Array.isArray(events)) {
                 for (const event of events) {
                     try {
-                        // Find or create the player
-                        let player = await prisma.player.findFirst({
-                            where: {
-                                user_id: userId,
-                                name: { equals: event.playerName, mode: 'insensitive' as const },
-                            },
-                        });
-
+                        const player = await findOrCreatePlayer(event.playerName);
                         if (player) {
-                            // Log as a system event
                             await prisma.systemLog.create({
                                 data: {
                                     user_id: userId,
@@ -211,7 +239,6 @@ export class DesktopController extends BaseController {
                             eventsProcessed++;
                         }
                     } catch (err) {
-                        // Skip individual event errors
                         console.error('[DesktopSync] Event error:', err);
                     }
                 }
@@ -221,13 +248,7 @@ export class DesktopController extends BaseController {
             if (notes && Array.isArray(notes)) {
                 for (const note of notes) {
                     try {
-                        const player = await prisma.player.findFirst({
-                            where: {
-                                user_id: userId,
-                                name: { equals: note.playerName, mode: 'insensitive' as const },
-                            },
-                        });
-
+                        const player = await findOrCreatePlayer(note.playerName);
                         if (player) {
                             await prisma.note.create({
                                 data: {
@@ -251,13 +272,7 @@ export class DesktopController extends BaseController {
             if (statsUpdates && Array.isArray(statsUpdates)) {
                 for (const update of statsUpdates) {
                     try {
-                        const player = await prisma.player.findFirst({
-                            where: {
-                                user_id: userId,
-                                name: { equals: update.playerName, mode: 'insensitive' as const },
-                            },
-                        });
-
+                        const player = await findOrCreatePlayer(update.playerName);
                         if (player) {
                             const statsData: any = {};
                             if (update.vpip != null) statsData.vpip = Number(update.vpip);
