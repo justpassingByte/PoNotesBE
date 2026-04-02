@@ -463,9 +463,10 @@ Return ONLY valid JSON:
 4. TURN: action_line REQUIRED, turn_type REQUIRED, river_type=null
 5. RIVER: action_line + turn_type + river_type ALL REQUIRED
 6. hero_hand: MUST use EXACT 4-character valid poker format (e.g., "AcKd").
+   - Suits MUST be EXACTLY one of: c, d, h, s. NEVER output 'o' (offsuit) as a suit (e.g., NO "QoQd").
    - Use "T" for 10. Examples: "Ts9s" -> "Ts9s", "JTo" -> "JcTd".
    - If no suits are provided, assign random valid suits.
-   - For pocket pairs like "QQ" or "1010", output a valid pair like "QcQd" or "TcTd".
+   - For pocket pairs like "QQ" or "1010", output a valid pair with distinct suits like "QcQd" or "TcTd".
 7. board_cards: comma-separated, e.g. "As,7d,2c"
 8. BUCKET: Classify based on FLOP (first 3 cards), not full board.
 9. Bet sizes: "cbet nhỏ" / "bet 1/3" / "small bet" → cbet33_call. "Cbet to" / "bet 3/4" / "big bet" → cbet75_call.
