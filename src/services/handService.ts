@@ -446,7 +446,7 @@ export class HandService {
         parts.push(header);
 
         const playerObj = parsedHand.players?.find(p => p.name?.toLowerCase() === playerName.toLowerCase());
-        const holeCards = playerObj?.hole_cards?.join(' ') || '';
+        const holeCards = mistake.hole_cards || playerObj?.hole_cards?.join(' ') || '';
         if (holeCards && holeCards.length > 0) {
             parts.push(`Hole Cards: [${holeCards}]`);
         }
@@ -473,6 +473,7 @@ export class HandService {
             pot_type: potType,
             street: streetLow,
             position: position || null,
+            hole_cards: holeCards || null,
             board_cards: relevantCards.length > 0 ? relevantCards : null,
             board_bucket: boardBucket,
             facing: facing || null,

@@ -140,6 +140,9 @@ You MUST act as an elite Poker Coach. Do NOT output generic filler text (like "P
 Your "summary", "reasoning_trace", and "mistakes" descriptions MUST be deep, specific, and reference exact hand combinations, sizing, and board textures. 
 The output notes will be stored to explicitly exploit opponents in the future. The quality must be incredibly high.
 
+### CRITICAL VOCABULARY RULE:
+You MUST use English words for ALL poker actions (call, fold, raise, bet, check, all-in). DO NOT translate them to Vietnamese (e.g., ALWAYS use "call" instead of "gọi" or "theo", ALWAYS use "fold" instead of "bỏ", ALWAYS use "raise" instead of "tố").
+
 ### OUTPUT SCHEMA (STRICT JSON):
 {
   "summary": "Detailed technical overview of the hand. Describe the preflop dynamics, flop texture, and the overarching theme of the hand in at least 2-3 sentences.",
@@ -151,6 +154,7 @@ The output notes will be stored to explicitly exploit opponents in the future. T
     "street": "preflop|flop|turn|river", 
     "player": "Exact player name", 
     "position": "string (Target table position like BTN/SB/BB)",
+    "hole_cards": "Exact cards the player was holding if known (e.g., AhKd), else null",
     "description": "Specific error made. Focus on the core LEAK being exhibited (e.g., Calling too wide, missing thin value, sized improperly).", 
     "actual_action": "The exact action they TOOK (e.g., 'CALL 33% pot')",
     "gto_action": "The mathematically correct GTO action or frequencies (e.g., '100% FOLD' or 'BET 75% pot with 80% frequency')",
