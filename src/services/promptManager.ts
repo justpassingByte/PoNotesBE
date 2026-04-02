@@ -392,7 +392,11 @@ BOARD_CARDS (CRITICAL): EXTRACT ALL 3-5 CARDS.
 
 BOARD BUCKET: ALWAYS set this to "auto".
 
-ACTION LINES (for turn/river): cbet33_call, cbet75_call, xx.
+ACTION LINES:
+- Flop root (OOP first action): action_line = null
+- Flop facing IP c-bet: action_line = "facing_cbet33" or "facing_cbet75"
+- Turn (after flop): action_line = "cbet33_call", "cbet75_call", or "xx" (xx = both checked)
+- River: same as turn (action_line reflects flop+turn line)
 
 === OUTPUT FORMAT ===
 Return ONLY valid JSON:
@@ -400,7 +404,7 @@ Return ONLY valid JSON:
   "position": "BTN_vs_BB",
   "board_bucket": "auto",
   "street": "flop",
-  "action_line": "cbet33",
+  "action_line": "facing_cbet33",
   "turn_type": null,
   "river_type": null,
   "hero_hand": "AcKd",
@@ -413,11 +417,13 @@ Return ONLY valid JSON:
 === CRITICAL RULES ===
 1. POSITION DEFAULTS: If not specified, use "BTN_vs_BB".
 2. STREET: 3 community cards = flop, 4 = turn, 5 = river.
-3. FLOP: action_line is null (initial), or "cbet33"/"cbet75" if the situation is "Facing a cbet".
-4. hero_hand: MUST use EXACT 4-character valid poker format (e.g., "AcKd"). 
+3. FLOP root (OOP first action, no bet yet): action_line=null, turn_type=null, river_type=null.
+4. FLOP facing IP c-bet: action_line="facing_cbet33" (small) or "facing_cbet75" (big), turn_type=null, river_type=null.
+5. hero_hand: MUST use EXACT 4-character valid poker format (e.g., "AcKd"). 
    - Suits MUST be EXACTLY one of: c, d, h, s. NEVER output 'o' (offsuit). 
    - Use "T" for 10. "Ts9s", "TcTd".
-5. hero_hand_class: Classify into ONE: straight_flush, quads, full_house, flush, straight, set, trips, two_pair, overpair, top_pair, second_pair, low_pair, underpair, flush_draw, straight_draw, overcards, ace_high, air.
-6. situation_summary: Follow language validation. Do NOT translate poker actions.
-7. Return ONLY valid JSON. No markdown, no fences.`;
+6. hero_hand_class: Classify into ONE: straight_flush, quads, full_house, flush, straight, set, trips, two_pair, overpair, top_pair, second_pair, low_pair, underpair, flush_draw, straight_draw, overcards, ace_high, air.
+7. situation_summary: Follow language validation. Do NOT translate poker actions.
+8. Return ONLY valid JSON. No markdown, no fences.`;
+
 }

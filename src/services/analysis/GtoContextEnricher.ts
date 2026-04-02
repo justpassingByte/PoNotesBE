@@ -5,24 +5,25 @@ import { prisma } from '../../lib/prisma';
 export class GtoContextEnricher {
     /**
      * Extracts context and queries GTO database to build a RAG baseline.
+     * Supports:
+     *   - Flop root spot (OOP check/bet vs IP check/bet)
+     *   - Flop facing c-bet spot (OOP fold/call/raise when IP bets)
      */
     public static async enrich(parsedHand: ParsedHand): Promise<{
         gtoContext: string;
         warnings: string[];
     }> {
         const warnings: string[] = [];
-        
+
         // 1. Check for multi-way
-        // Find players who reached flop
         const preflop = parsedHand.actions?.preflop || [];
         const foldedBeforeFlop = new Set(preflop.filter(a => a.action?.toLowerCase() === 'fold').map(a => a.player));
-        
+
         let activePlayers: string[] = [];
         if (parsedHand.players) {
             activePlayers = parsedHand.players.map(p => p.name).filter(n => !foldedBeforeFlop.has(n));
         }
 
-        // Check showdown/street actions if players array is missing
         if (activePlayers.length === 0) {
             const flopActors = new Set((parsedHand.actions?.flop || []).map(a => a.player));
             if (flopActors.size > 0) activePlayers = Array.from(flopActors);
@@ -34,11 +35,10 @@ export class GtoContextEnricher {
         }
 
         if (activePlayers.length < 2) {
-            return { gtoContext: '', warnings }; // Everyone folded preflop or parse failed
+            return { gtoContext: '', warnings };
         }
 
         // 2. Identify Positions (IP and OOP)
-        // Try mapping them into [BTN_vs_BB, SB_vs_BB, CO_vs_BTN]
         const playerPositions = parsedHand.players.reduce((acc, p) => {
             if (p.name && p.position) acc[p.name] = p.position.toUpperCase();
             return acc;
@@ -47,14 +47,12 @@ export class GtoContextEnricher {
         let p1Pos = playerPositions[activePlayers[0]] || '';
         let p2Pos = playerPositions[activePlayers[1]] || '';
 
-        // If positions are missing, we can't reliably map to GTO spot
         if (!p1Pos || !p2Pos) {
-             // Let's try to extract from actions
-             const preflopActs = parsedHand.actions?.preflop || [];
-             for (const a of preflopActs) {
-                 if (a.player === activePlayers[0] && a.position) p1Pos = a.position.toUpperCase();
-                 if (a.player === activePlayers[1] && a.position) p2Pos = a.position.toUpperCase();
-             }
+            const preflopActs = parsedHand.actions?.preflop || [];
+            for (const a of preflopActs) {
+                if (a.player === activePlayers[0] && a.position) p1Pos = a.position.toUpperCase();
+                if (a.player === activePlayers[1] && a.position) p2Pos = a.position.toUpperCase();
+            }
         }
 
         if (!p1Pos || !p2Pos) {
@@ -62,7 +60,6 @@ export class GtoContextEnricher {
             return { gtoContext: '', warnings };
         }
 
-        // Standardize positions
         const posOrder = ['SB', 'BB', 'UTG', 'MP', 'HJ', 'CO', 'BTN'];
         const p1Idx = posOrder.indexOf(p1Pos);
         const p2Idx = posOrder.indexOf(p2Pos);
@@ -72,32 +69,27 @@ export class GtoContextEnricher {
             if (p1Idx < p2Idx) { oop = p1Pos; ip = p2Pos; }
             else { oop = p2Pos; ip = p1Pos; }
         } else {
-            // Fallback heuristics
             oop = p1Pos; ip = p2Pos;
         }
 
-        // Map to 3 standard spots: BTN_vs_BB | SB_vs_BB | CO_vs_BTN
         let spotKey = '';
         if (oop === 'SB' && ip === 'BB') {
             spotKey = 'SB_vs_BB';
         } else if (oop === 'BB' && ['BTN', 'CO', 'MP', 'HJ', 'UTG'].includes(ip)) {
-             // In actual postflop, BB is OOP vs everyone except SB
-            spotKey = 'BTN_vs_BB'; 
+            spotKey = 'BTN_vs_BB';
         } else if (['UTG', 'MP', 'HJ', 'CO'].includes(oop) && ip === 'BTN') {
             spotKey = 'CO_vs_BTN';
         } else {
-            // Generic fallback
             spotKey = 'BTN_vs_BB';
         }
 
         // 3. Extract Board Bucket
         const flopCards = (parsedHand.board || []).slice(0, 3);
         if (flopCards.length < 3) {
-            return { gtoContext: '', warnings }; // Preflop
+            return { gtoContext: '', warnings };
         }
 
         const bucketResult = BoardBucketParser.categorize(flopCards);
-        // Map detailed bucket to simple bucket format for GtoSpot DB, e.g. "A_dry", "K_dry"...
         let boardBucket = '';
         if (bucketResult.highCardTier === 'ACE_HIGH') {
             if (bucketResult.suitedness === 'MONOTONE') boardBucket = 'monotone_A';
@@ -108,46 +100,120 @@ export class GtoContextEnricher {
             if (bucketResult.suitedness === 'TWO_TONE') boardBucket = 'two_tone_K';
             else boardBucket = 'K_dry';
         } else if (bucketResult.highCardTier === 'QUEEN_HIGH') {
-             boardBucket = 'Q_dry';
+            boardBucket = 'Q_dry';
         } else if (bucketResult.highCardTier === 'JACK_HIGH') {
-             boardBucket = 'broadway_wet';
+            boardBucket = 'broadway_wet';
         } else {
-             // LOW_BOARD or UNKNOWN
-             if (bucketResult.pairedStatus !== 'UNPAIRED') boardBucket = 'paired_low';
-             else if (bucketResult.suitedness === 'MONOTONE') boardBucket = 'monotone_low';
-             else if (bucketResult.suitedness === 'TWO_TONE') boardBucket = 'two_tone_low';
-             else if (bucketResult.connectivity === 'CONNECTED') boardBucket = 'connected_mid'; // Or connected_low
-             else boardBucket = 'low_dry';
+            if (bucketResult.pairedStatus !== 'UNPAIRED') boardBucket = 'paired_low';
+            else if (bucketResult.suitedness === 'MONOTONE') boardBucket = 'monotone_low';
+            else if (bucketResult.suitedness === 'TWO_TONE') boardBucket = 'two_tone_low';
+            else if (bucketResult.connectivity === 'CONNECTED') boardBucket = 'connected_mid';
+            else boardBucket = 'low_dry';
         }
 
+        // 4. Detect flop scenario from actual hand actions
+        const flopActions = parsedHand.actions?.flop || [];
+        const flopPot = parsedHand.pot ?? 5.5; // pot at start of flop in BB
+        const facingCbetSize = detectFacingCbet(flopActions, flopPot);
+
+        // 5. Query root spot (check/bet strategy)
         // @ts-ignore - Prisma Client cache issue
-        const gtoSpot = await prisma.gtoSpot.findFirst({
+        const rootSpot = await prisma.gtoSpot.findFirst({
             where: {
                 position: spotKey,
                 board_bucket: boardBucket,
-                street: 'flop'
+                street: 'flop',
+                action_line: null,
             }
         });
 
-        if (!gtoSpot) {
+        // 6. Query facing c-bet spot if applicable
+        let facingSpot: any = null;
+        if (facingCbetSize) {
+            const actionLine = facingCbetSize === 'small' ? 'facing_cbet33' : 'facing_cbet75';
+            // @ts-ignore
+            facingSpot = await prisma.gtoSpot.findFirst({
+                where: {
+                    position: spotKey,
+                    board_bucket: boardBucket,
+                    street: 'flop',
+                    action_line: actionLine,
+                }
+            });
+        }
+
+        if (!rootSpot && !facingSpot) {
             warnings.push(`MISSING_GTO: Không tìm thấy data giải trong CSDL cho spot ${spotKey} board ${boardBucket}. Sử dụng AI baseline.`);
             return { gtoContext: '', warnings };
         }
 
-        // 4. Build Context String
-        const contextString = `
-[GTO REFERENCE DB]
-Spot Match: ${spotKey}
-Board Bucket: ${boardBucket}
-Flop Texture: ${flopCards.join(' ')}
+        // 7. Build Context String
+        const contextParts: string[] = [];
+        contextParts.push(`[GTO REFERENCE DB]`);
+        contextParts.push(`Spot Match: ${spotKey} | Board Bucket: ${boardBucket}`);
+        contextParts.push(`Flop Texture: ${flopCards.join(' ')}`);
+        contextParts.push('');
 
-Baseline Strategy (Mathematical Solver Data):
-OOP Strategy: Check ${(gtoSpot.oop_check * 100).toFixed(1)}%, Bet Small ${(gtoSpot.oop_bet_small * 100).toFixed(1)}%, Bet Big ${(gtoSpot.oop_bet_big * 100).toFixed(1)}%
-IP Strategy: Check ${(gtoSpot.ip_check * 100).toFixed(1)}%, Bet Small ${(gtoSpot.ip_bet_small * 100).toFixed(1)}%, Bet Big ${(gtoSpot.ip_bet_big * 100).toFixed(1)}%
+        // Root strategy (OOP's first decision)
+        if (rootSpot) {
+            contextParts.push(`--- OOP Flop Root Strategy (First Action) ---`);
+            contextParts.push(`Check: ${pct(rootSpot.oop_check)}%  |  Bet Small (~33%): ${pct(rootSpot.oop_bet_small)}%  |  Bet Big (~75%): ${pct(rootSpot.oop_bet_big)}%`);
+            contextParts.push('');
+            contextParts.push(`--- IP Flop Strategy (After OOP Check) ---`);
+            contextParts.push(`Check: ${pct(rootSpot.ip_check)}%  |  Bet Small (~33%): ${pct(rootSpot.ip_bet_small)}%  |  Bet Big (~75%): ${pct(rootSpot.ip_bet_big)}%`);
+        }
 
-Use these percentages as the absolute mathematically optimal foundation. Any deviation must be justified as an explicit exploit!
-`;
+        // Facing c-bet strategy (OOP's reaction)
+        if (facingSpot) {
+            const sizeLabel = facingCbetSize === 'small' ? '~33% pot' : '~75% pot';
+            contextParts.push('');
+            contextParts.push(`--- OOP vs IP C-Bet (${sizeLabel}) - KEY SCENARIO ---`);
+            contextParts.push(`Fold: ${pct(facingSpot.oop_fold)}%  |  Call: ${pct(facingSpot.oop_call)}%  |  Raise: ${pct(facingSpot.oop_raise)}%`);
+            contextParts.push(`⚠️ This is the exact scenario in this hand. Compare OOP's actual action against these GTO frequencies.`);
+        }
 
-        return { gtoContext: contextString, warnings };
+        contextParts.push('');
+        contextParts.push(`Use these percentages as the absolute mathematically optimal foundation. Any deviation must be justified as an explicit exploit!`);
+
+        return { gtoContext: contextParts.join('\n'), warnings };
     }
 }
+
+/** Format float as percentage string */
+function pct(val: number | null | undefined): string {
+    return ((val ?? 0) * 100).toFixed(1);
+}
+
+/**
+ * Detect if OOP is facing a c-bet on the flop.
+ * Returns 'small' | 'large' | null based on flop action sequence.
+ *
+ * Pattern: OOP checks → IP bets → (OOP to act)
+ * We classify bet size relative to pot (33% pot = small, 75% = big).
+ */
+function detectFacingCbet(
+    flopActions: Array<{ player?: string; action?: string; amount?: number }>,
+    pot: number = 5.5
+): 'small' | 'large' | null {
+    if (!flopActions || flopActions.length < 2) return null;
+
+    const actions = flopActions.map(a => ({
+        player: a.player,
+        action: (a.action || '').toLowerCase(),
+        amount: a.amount ?? 0,
+    }));
+
+    // Look for sequence: check → bet
+    for (let i = 0; i < actions.length - 1; i++) {
+        if (actions[i].action === 'check' && actions[i + 1].action === 'bet') {
+            const betAmt = actions[i + 1].amount;
+            if (betAmt > 0 && pot > 0) {
+                // pot-relative threshold: < 50% pot = small (~33%), >= 50% = large (~75%)
+                return (betAmt / pot) < 0.5 ? 'small' : 'large';
+            }
+        }
+    }
+
+    return null;
+}
+

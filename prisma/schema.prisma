@@ -387,13 +387,18 @@ model GtoSpot {
   pot       Float
   eff_stack Float
 
-  // Overall aggregated strategy
+  // Overall aggregated strategy (root node: check/bet actions)
   oop_check     Float @default(0)
   oop_bet_small Float @default(0)
   oop_bet_big   Float @default(0)
   ip_check      Float @default(0)
   ip_bet_small  Float @default(0)
   ip_bet_big    Float @default(0)
+
+  // Facing-bet strategy (fold/call/raise when action_line = 'facing_cbet33' etc.)
+  oop_fold  Float @default(0)
+  oop_call  Float @default(0)
+  oop_raise Float @default(0)
 
   hands GtoHand[]
 
@@ -412,6 +417,11 @@ model GtoHand {
   check     Float @default(0)
   bet_small Float @default(0)
   bet_big   Float @default(0)
+
+  // Facing-bet actions (used when spot.action_line = 'facing_cbet33' etc.)
+  fold  Float @default(0)
+  call  Float @default(0)
+  raise Float @default(0)
 
   spot GtoSpot @relation(fields: [spot_id], references: [id], onDelete: Cascade)
 

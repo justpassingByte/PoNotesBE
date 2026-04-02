@@ -72,6 +72,7 @@ export class GtoPromptBuilder {
 
         // Enforce null rules by street
         if (parsed.street === 'flop') {
+            parsed.action_line = null;
             parsed.turn_type = null;
             parsed.river_type = null;
         } else if (parsed.street === 'turn') {

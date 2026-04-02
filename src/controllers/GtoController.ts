@@ -27,17 +27,26 @@ const GTO_REP_BOARDS: Record<string, string[]> = {
 };
 
 // ─── Helper: group hands and compute class summaries ────────────
-function buildHandData(hands: any[]) {
+function buildHandData(hands: any[], isFacing = false) {
   const grouped: Record<string, Record<string, any[]>> = { oop: {}, ip: {} };
   for (const h of hands) {
     if (!grouped[h.player]) grouped[h.player] = {};
     if (!grouped[h.player][h.hand_class]) grouped[h.player][h.hand_class] = [];
-    grouped[h.player][h.hand_class].push({
-      hand: h.hand,
-      check: h.check,
-      bet_small: h.bet_small,
-      bet_big: h.bet_big,
-    });
+    if (isFacing) {
+      grouped[h.player][h.hand_class].push({
+        hand: h.hand,
+        fold: h.fold,
+        call: h.call,
+        raise: h.raise,
+      });
+    } else {
+      grouped[h.player][h.hand_class].push({
+        hand: h.hand,
+        check: h.check,
+        bet_small: h.bet_small,
+        bet_big: h.bet_big,
+      });
+    }
   }
 
   const classSummary: Record<string, Record<string, any>> = { oop: {}, ip: {} };
@@ -45,12 +54,21 @@ function buildHandData(hands: any[]) {
     for (const [cls, arr] of Object.entries(grouped[p] || {})) {
       const list = arr as any[];
       const n = list.length;
-      classSummary[p][cls] = {
-        count: n,
-        avg_check: +(list.reduce((s, h) => s + h.check, 0) / n).toFixed(4),
-        avg_bet_small: +(list.reduce((s, h) => s + h.bet_small, 0) / n).toFixed(4),
-        avg_bet_big: +(list.reduce((s, h) => s + h.bet_big, 0) / n).toFixed(4),
-      };
+      if (isFacing) {
+        classSummary[p][cls] = {
+          count: n,
+          avg_fold:  +(list.reduce((s, h) => s + (h.fold  ?? 0), 0) / n).toFixed(4),
+          avg_call:  +(list.reduce((s, h) => s + (h.call  ?? 0), 0) / n).toFixed(4),
+          avg_raise: +(list.reduce((s, h) => s + (h.raise ?? 0), 0) / n).toFixed(4),
+        };
+      } else {
+        classSummary[p][cls] = {
+          count: n,
+          avg_check:    +(list.reduce((s, h) => s + h.check, 0) / n).toFixed(4),
+          avg_bet_small: +(list.reduce((s, h) => s + h.bet_small, 0) / n).toFixed(4),
+          avg_bet_big:   +(list.reduce((s, h) => s + h.bet_big, 0) / n).toFixed(4),
+        };
+      }
     }
   }
 
@@ -73,6 +91,12 @@ function spotToJson(spot: any) {
 }
 
 function spotStrategy(spot: any) {
+  const isFacing = spot.action_line?.startsWith('facing_');
+  if (isFacing) {
+    return {
+      oop: { fold: spot.oop_fold, call: spot.oop_call, raise: spot.oop_raise },
+    };
+  }
   return {
     oop: { check: spot.oop_check, bet_small: spot.oop_bet_small, bet_big: spot.oop_bet_big },
     ip: { check: spot.ip_check, bet_small: spot.ip_bet_small, bet_big: spot.ip_bet_big },
@@ -187,7 +211,8 @@ export class GtoController {
         orderBy: [{ player: 'asc' }, { hand_class: 'asc' }, { hand: 'asc' }],
       });
 
-      const { grouped, classSummary } = buildHandData(hands);
+      const isFacing = spot.action_line?.startsWith('facing_');
+      const { grouped, classSummary } = buildHandData(hands, isFacing);
 
       // Step 5: Find hero hand
       let heroResult: any = null;
@@ -217,9 +242,10 @@ export class GtoController {
         }
       }
 
-      // Step 6: Query Future Runouts if Hero Hand exists
+      // Step 6: Query Future Runouts (only for non-facing root spots)
       const futureRunouts: any[] = [];
-      if (heroResult) {
+      const isFacingSpot = spot.action_line?.startsWith('facing_');
+      if (heroResult && !isFacingSpot) {
         if (parsed.street === 'turn' && parsed.action_line && parsed.turn_type) {
           const runoutSpots = await (prisma as any).gtoSpot.findMany({
             where: {
