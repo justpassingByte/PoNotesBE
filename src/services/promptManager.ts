@@ -413,7 +413,7 @@ Return ONLY valid JSON:
 === CRITICAL RULES ===
 1. POSITION DEFAULTS: If not specified, use "BTN_vs_BB".
 2. STREET: 3 community cards = flop, 4 = turn, 5 = river.
-3. FLOP: action_line=null, turn_type=null, river_type=null.
+3. FLOP: action_line is null (initial), or "cbet33"/"cbet75" if the situation is "Facing a cbet".
 4. hero_hand: MUST use EXACT 4-character valid poker format (e.g., "AcKd"). 
    - Suits MUST be EXACTLY one of: c, d, h, s. NEVER output 'o' (offsuit). 
    - Use "T" for 10. "Ts9s", "TcTd".

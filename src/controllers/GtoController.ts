@@ -140,16 +140,20 @@ export class GtoController {
       // Step 2: Deterministic bucket mapping and hand transposition
       let boardBucket = parsed.board_bucket;
       let queryHand = parsed.hero_hand;
+      let repBoardStr: string | null = null;
 
       if (parsed.board_cards && (parsed.board_bucket === 'auto' || !parsed.board_bucket)) {
           const cards = parsed.board_cards.split(',').map(c => c.trim());
           boardBucket = BoardBucketParser.getGtoBucketName(cards);
           
           const repBoard = GTO_REP_BOARDS[boardBucket];
-          if (repBoard && parsed.hero_hand) {
-              const suitMap = HandTransposer.createSuitMap(cards, repBoard);
-              queryHand = HandTransposer.transposeHand(parsed.hero_hand, suitMap);
-              console.log(`[GTO ORACLE] Transposed Hand: ${parsed.hero_hand} -> ${queryHand} for bucket ${boardBucket}`);
+          if (repBoard) {
+              repBoardStr = repBoard.join(',');
+              if (parsed.hero_hand) {
+                  const suitMap = HandTransposer.createSuitMap(cards, repBoard);
+                  queryHand = HandTransposer.transposeHand(parsed.hero_hand, suitMap);
+                  console.log(`[GTO ORACLE] Transposed Hand: ${parsed.hero_hand} -> ${queryHand} for bucket ${boardBucket}`);
+              }
           }
       }
 
@@ -158,6 +162,7 @@ export class GtoController {
         where: {
           position: parsed.position,
           board_bucket: boardBucket,
+          board: repBoardStr || undefined, // Filter by rep board to avoid cross-board ambiguity
           street: parsed.street,
           action_line: parsed.action_line || null,
           turn_type: parsed.turn_type || null,
@@ -211,14 +216,14 @@ export class GtoController {
         }
       }
 
-      // Step 5: Query Future Runouts if Hero Hand exists
+      // Step 6: Query Future Runouts if Hero Hand exists
       const futureRunouts: any[] = [];
       if (heroResult) {
         if (parsed.street === 'turn' && parsed.action_line && parsed.turn_type) {
           const runoutSpots = await (prisma as any).gtoSpot.findMany({
             where: {
               position: parsed.position,
-              board_bucket: boardBucket,
+              board: repBoardStr || undefined,
               street: 'river',
               action_line: parsed.action_line,
               turn_type: parsed.turn_type,
@@ -248,7 +253,7 @@ export class GtoController {
            const runoutSpots = await (prisma as any).gtoSpot.findMany({
              where: {
                position: parsed.position,
-               board_bucket: boardBucket,
+               board: repBoardStr || undefined,
                street: 'turn',
                action_line: bestActionLine,
              }
