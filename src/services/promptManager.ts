@@ -458,7 +458,10 @@ Return ONLY valid JSON:
 3. FLOP: action_line=null, turn_type=null, river_type=null
 4. TURN: action_line REQUIRED, turn_type REQUIRED, river_type=null
 5. RIVER: action_line + turn_type + river_type ALL REQUIRED
-6. hero_hand: "AcKd" format (rank+suit concatenated). Use "T" for 10.
+6. hero_hand: EXACT "AcKd" format (no spaces, 4 characters). 
+   - MUST use "T" for 10 (e.g. "Ts9s" -> "Ts9s").
+   - If user writes without spaces (e.g. "Ts9s", "AKo"), parse it carefully.
+   - If user writes a pocket pair without suits (e.g. "QQ"), default to a valid combination like "QcQd".
 7. board_cards: comma-separated, e.g. "As,7d,2c"
 8. BUCKET: Classify based on FLOP (first 3 cards), not full board.
 9. Bet sizes: "cbet nhỏ" / "bet 1/3" / "small bet" → cbet33_call. "Cbet to" / "bet 3/4" / "big bet" → cbet75_call.

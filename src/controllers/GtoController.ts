@@ -99,12 +99,19 @@ export class GtoController {
       const groqData = await groqResp.json();
       const llmText = groqData.choices?.[0]?.message?.content || '';
 
+      console.log('\n--- GTO ORACLE LLM PARSING DEBUG ---');
+      console.log('Query:', question);
+      console.log('LLM Raw Output:', llmText);
+
       let parsed: any;
       try {
         parsed = GtoPromptBuilder.parseResponse(llmText);
+        console.log('Parsed JSON:', JSON.stringify(parsed, null, 2));
       } catch (parseErr: any) {
+        console.error('Parse Error:', parseErr.message);
         return res.status(422).json({ error: parseErr.message, raw: llmText });
       }
+      console.log('------------------------------------\n');
 
       // Step 2: Query DB
       const spot = await (prisma as any).gtoSpot.findFirst({
