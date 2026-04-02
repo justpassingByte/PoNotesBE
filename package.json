@@ -37,6 +37,8 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",
     "node-cache": "^5.1.2",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^8.0.4",
     "openai": "^6.32.0",
     "pg": "^8.19.0",
     "prisma": "^6.19.2",
@@ -49,6 +51,8 @@
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/multer": "^2.1.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^7.0.11",
     "@types/uuid": "^10.0.0",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.6",

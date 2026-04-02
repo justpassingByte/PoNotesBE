@@ -10,6 +10,7 @@ import { LoggerService, LogType } from './loggerService';
 import OpenAI from 'openai';
 import { PatternEngine } from './analysis/PatternEngine';
 import { BoardBucketParser } from './analysis/context/BoardBucketParser';
+import { GtoContextEnricher } from './analysis/GtoContextEnricher';
 import axios from 'axios';
 export class HandService {
     constructor(
@@ -444,11 +445,28 @@ export class HandService {
         if (position) header += ` (${position})`;
         parts.push(header);
 
+        const playerObj = parsedHand.players?.find(p => p.name?.toLowerCase() === playerName.toLowerCase());
+        const holeCards = playerObj?.hole_cards?.join(' ') || '';
+        if (holeCards && holeCards.length > 0) {
+            parts.push(`Hole Cards: [${holeCards}]`);
+        }
+        
+        const potSize = parsedHand.pot || 0;
+        const currency = (parsedHand as any).currency || 'BB';
+        if (potSize > 0) {
+            parts.push(`Pot: ${potSize} ${currency}`);
+        }
+
         if (facing) parts.push(`Facing: ${facing}`);
         if (action) parts.push(`Action: ${action}`);
-        parts.push(`❌ [${severity.toUpperCase()}] ${mistake.description}`);
-        if (mistake.better_line) parts.push(`✅ Better: ${mistake.better_line}`);
-        if (mistake.gto_deviation_reason) parts.push(`💡 ${mistake.gto_deviation_reason}`);
+        // ── Compare Actual vs GTO ──
+        if (mistake.actual_action) parts.push(`👉 Thực tế: ${mistake.actual_action}`);
+        if (mistake.gto_action) parts.push(`🤖 GTO Data: ${mistake.gto_action}`);
+
+        parts.push(`❌ Leak [${severity.toUpperCase()}]: ${mistake.description}`);
+        if (mistake.gto_deviation_reason) parts.push(`💡 Phân tích phân kỳ: ${mistake.gto_deviation_reason}`);
+        if (mistake.better_line) parts.push(`✅ Better Line: ${mistake.better_line}`);
+        if (mistake.exploit_strategy) parts.push(`🎯 Exploit Plan: ${mistake.exploit_strategy}`);
 
         // ── Build structured metadata ──
         const metadata: Record<string, any> = {
@@ -461,8 +479,11 @@ export class HandService {
             action: action || null,
             severity,
             description: mistake.description,
+            actual_action: mistake.actual_action || null,
+            gto_action: mistake.gto_action || null,
             better_line: mistake.better_line || null,
             gto_reason: mistake.gto_deviation_reason || null,
+            exploit_strategy: mistake.exploit_strategy || null,
         };
 
         return { content: parts.join('\n'), metadata };
@@ -643,6 +664,15 @@ export class HandService {
         const aiConfig = userId ? await prisma.userAIConfig.findUnique({ where: { user_id: userId } }) : null;
         const userSettings = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { language: true } }) : null;
 
+        // Perform GTO RAG Step
+        let gtoContext = '';
+        let gtoWarnings: string[] = [];
+        if (parsedData) {
+            const enriched = await GtoContextEnricher.enrich(parsedData);
+            gtoContext = enriched.gtoContext;
+            gtoWarnings = enriched.warnings;
+        }
+
         // NEW: Fetch deep player context to enable TARGETED EXPLOITS in hand analysis
         let playerContext = "";
         if (parsedData?.players && userId) {
@@ -681,7 +711,7 @@ export class HandService {
         });
 
         const promptSettings = { ...(aiConfig || {}), language: userSettings?.language };
-        const prompt = buildHandAnalysisPrompt(aiConfig?.analysis_prompt || undefined, promptSettings as any, playerContext);
+        const prompt = buildHandAnalysisPrompt(aiConfig?.analysis_prompt || undefined, promptSettings as any, playerContext, gtoContext);
         const response = await client.chat.completions.create({
             messages: [
                 { role: 'system', content: prompt },
@@ -697,6 +727,11 @@ export class HandService {
         // Verbose Logging for Debugging/Learning Loop
         console.log(`\n[AI_LEARNING_DUMP] Raw Model Output:\n${rawJson}\n`);
 
-        return JSON.parse(rawJson);
+        const resultJson = JSON.parse(rawJson);
+        if (gtoWarnings.length > 0) {
+            resultJson.warnings = [...(resultJson.warnings || []), ...gtoWarnings];
+        }
+
+        return resultJson;
     }
 }

@@ -24,6 +24,7 @@ import { ocrRoutes } from './routes/ocrRoutes';
 import { userRoutes } from './routes/userRoutes';
 import { apiKeyRoutes } from './routes/apiKeyRoutes';
 import { desktopRoutes } from './routes/desktopRoutes';
+import { gtoRoutes } from './routes/gtoRoutes';
 import cookieParser from 'cookie-parser';
 import { authMiddleware } from './middleware/authMiddleware';
 
@@ -88,6 +89,9 @@ app.use('/api/payments', paymentRoutes);
 
 // Desktop app routes (uses own apiKeyMiddleware, must be before authMiddleware)
 app.use('/api/desktop', desktopRoutes);
+
+// GTO strategy routes (public, data is not user-specific)
+app.use('/api/gto', gtoRoutes);
 
 
 // All other /api routes require authentication

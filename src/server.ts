@@ -1,6 +1,7 @@
 import app from './app';
 import { config } from './config/unifiedConfig';
 import { invoiceExpiryWorker } from './core/invoiceExpiryWorker';
+import { initBackupCron } from './controllers/backupController';
 
 // Only start listening when running locally (not in Vercel serverless)
 if (process.env.VERCEL !== '1') {
@@ -10,6 +11,7 @@ if (process.env.VERCEL !== '1') {
 
         // Start background workers after server is up
         invoiceExpiryWorker.start();
+        initBackupCron();
     });
 
     // Graceful shutdown

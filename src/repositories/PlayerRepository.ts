@@ -114,10 +114,48 @@ export class PlayerRepository {
                     name: player.name,
                     platform_id: player.platform_id,
                     playstyle: player.playstyle,
-                    ai_profile: player.ai_profile,
                     aggression_score: (player as any).aggression_score || 0,
+                    looseness_score: (player as any).looseness_score || 0,
+                    
+                    // AI Fields
+                    ai_profile: player.ai_profile,
+                    ai_playstyle: (player as any).ai_playstyle,
+                    ai_aggression_level: (player as any).ai_aggression_level,
+                    ai_aggression_score: (player as any).ai_aggression_score,
+                    ai_gto_baseline: (player as any).ai_gto_baseline,
+                    ai_exploit_strategy: (player as any).ai_exploit_strategy,
+                    ai_stats_used: (player as any).ai_stats_used,
+                    ai_analysis_mode: (player as any).ai_analysis_mode,
+                    ai_range_matrix: (player as any).ai_range_matrix,
+                    ai_action_breakdown: (player as any).ai_action_breakdown,
+                    ai_last_analyzed_at: (player as any).ai_last_analyzed_at ? new Date((player as any).ai_last_analyzed_at) : null,
+
                     notes: player.notes && player.notes.length > 0 ? {
-                        create: player.notes.map((n: any) => ({ ...n, user_id: userId }))
+                        create: player.notes.map((n: any) => {
+                            const { id, player_id, ...rest } = n;
+                            return { ...rest, user_id: userId };
+                        })
+                    } : undefined,
+
+                    stats: (player as any).stats ? {
+                        create: (() => {
+                            const { id, player_id, ...statFields } = (player as any).stats;
+                            return statFields;
+                        })()
+                    } : undefined,
+
+                    patterns: (player as any).patterns && (player as any).patterns.length > 0 ? {
+                        create: (player as any).patterns.map((p: any) => {
+                            const { id, player_id, ...rest } = p;
+                            return rest;
+                        })
+                    } : undefined,
+
+                    analysis_contexts: (player as any).analysis_contexts && (player as any).analysis_contexts.length > 0 ? {
+                        create: (player as any).analysis_contexts.map((ac: any) => {
+                            const { id, player_id, ...rest } = ac;
+                            return rest;
+                        })
                     } : undefined
                 }
             }));

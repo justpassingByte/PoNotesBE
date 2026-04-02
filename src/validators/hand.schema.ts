@@ -53,14 +53,18 @@ export type HandAction = z.infer<typeof HandActionSchema>;
  */
 export const HandAnalysisSchema = z.object({
     summary: z.string().optional(),
+    warnings: z.array(z.string()).optional(),
     reasoning_trace: z.array(z.string()).default([]),
     mistakes: z.array(z.object({
         street: z.string(),
         player: z.string(),
         position: z.string().optional(),
         description: z.string(),
+        actual_action: z.string().optional(),
+        gto_action: z.string().optional(),
         better_line: z.string().optional(),
         gto_deviation_reason: z.string().optional(),
+        exploit_strategy: z.string().optional(),
         severity: z.enum(['minor', 'moderate', 'critical']).optional()
     })).default([]),
     exploit_suggestions: z.array(z.string()).default([]),

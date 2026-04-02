@@ -50,7 +50,8 @@ export function buildHandAnalysisPrompt(
     hand_behavior_toggles?: any;
     language?: string;
   },
-  playerContext?: string
+  playerContext?: string,
+  gtoContext?: string
 ): string {
   const style = settings?.hand_style || 'Exploit';
   const aggression = settings?.hand_aggression_bias ?? 85;
@@ -106,6 +107,12 @@ ${style === 'Exploit' ? `You are in EXPLOIT mode.
 - Avoid over-folding. If you can exploit a leak by betting, never default to folding.
 - EV > Balance: Suggest the most profitable line, even if theoretically unbalanced.
 ` : 'Solid fundamentals with conditional exploit pivoting.'}
+
+### GTO REFERENCE PROTOCOL:
+If a [GTO REFERENCE DB] block is provided, you MUST:
+1. Compare actual actions against the Mathematical Solver Data percentages.
+2. Document EXACTLY how the player's line deviated from the GTO frequencies (e.g. "They checked, but GTO bets this 80%").
+3. Translate this deviation into the 'better_line' and a highly actionable 'gto_deviation_reason' (Leak).
 `;
 
   const systemFooter = `
@@ -119,16 +126,19 @@ ${style === 'Exploit' ? `You are in EXPLOIT mode.
 
   const customBase = customPrompt ? `### USER-DEFINED INSTRUCTIONS:\n${customPrompt}\n` : "";
   const profileContext = playerContext ? `### OBSERVED PLAYER PROFILES (CRITICAL CONTEXT):\n${playerContext}\n` : "";
+  const ragContext = gtoContext ? `${gtoContext}\n` : "";
 
   return `${configBlock}
 
 ${profileContext}
+${ragContext}
 ${customBase}
 ${systemFooter}
 
 ### DETAILED ANALYSIS REQUIREMENT:
 You MUST act as an elite Poker Coach. Do NOT output generic filler text (like "Phân tích hành động của người chơi"). 
-Your "summary", "reasoning_trace", and "mistakes" descriptions MUST be deep, specific, and reference exact hand combinations, sizing, and board textures. Be highly analytical.
+Your "summary", "reasoning_trace", and "mistakes" descriptions MUST be deep, specific, and reference exact hand combinations, sizing, and board textures. 
+The output notes will be stored to explicitly exploit opponents in the future. The quality must be incredibly high.
 
 ### OUTPUT SCHEMA (STRICT JSON):
 {
@@ -141,13 +151,16 @@ Your "summary", "reasoning_trace", and "mistakes" descriptions MUST be deep, spe
     "street": "preflop|flop|turn|river", 
     "player": "Exact player name", 
     "position": "string (Target table position like BTN/SB/BB)",
-    "description": "Specific error made. Must mention hand ranges and sizing context.", 
-    "better_line": "The exact action and sizing they should have taken.",
-    "gto_deviation_reason": "Why this deviated from optimal play (e.g. 'c-bet size is too large for this dry texture').",
+    "description": "Specific error made. Focus on the core LEAK being exhibited (e.g., Calling too wide, missing thin value, sized improperly).", 
+    "actual_action": "The exact action they TOOK (e.g., 'CALL 33% pot')",
+    "gto_action": "The mathematically correct GTO action or frequencies (e.g., '100% FOLD' or 'BET 75% pot with 80% frequency')",
+    "better_line": "The exact theoretically optimal or maximally exploitative line they should have taken.",
+    "gto_deviation_reason": "Explain EXACTLY how this differs from GTO. (e.g., 'GTO bets here 80% because of range advantage. Checking loses value').",
+    "exploit_strategy": "Translate this leak into a direct counter-strategy. How can WE exploit this player in the future?",
     "severity": "minor|moderate|critical"
   }],
   "exploit_suggestions": [
-    "Actionable, highly specific exploit strategies based on the identified leaks."
+    "Actionable, highly specific EXPLOIT strategies based on the identified LEAKS to be used in future hands."
   ],
   "final_verdict": {
     "grade": "A|B|C|D|F",
@@ -333,3 +346,124 @@ ${schemaBlock}`;
 }
 
 export { KEYWORD_MAP };
+
+/**
+ * Build the system prompt for GTO Oracle — natural language poker query parser.
+ * Parses Vietnamese or English poker questions into structured JSON for GTO database lookup.
+ * 
+ * @param language - 'vi' or 'en' to determine situation_summary language
+ */
+export function buildGtoOraclePrompt(language?: string): string {
+  const languageRule = language === 'vi'
+    ? 'Respond the "situation_summary" field strictly in Vietnamese (vi), but retain standard Poker acronyms (BTN, XR, AQo, etc.) and action verbs (call, fold, raise, bet, check, all-in, 3bet, 4bet) in English. ABSOLUTELY DO NOT translate "call" to "gọi", "fold" to "bỏ", "raise" to "tố", etc.'
+    : 'Respond the "situation_summary" field in English.';
+
+  return `You are a poker hand parser for a GTO solver database. Parse Vietnamese or English poker questions into a structured JSON query.
+
+### LANGUAGE VALIDATION (MANDATORY)
+${languageRule}
+
+=== DATABASE SCHEMA ===
+
+POSITIONS (3 matchups available):
+- BTN_vs_BB (Button vs Big Blind) — DEFAULT if not specified
+- SB_vs_BB (Small Blind vs Big Blind)
+- CO_vs_BTN (Cutoff vs Button)
+
+HERO POSITION PARSING (critical — understand who "tôi"/"I" is):
+
+Vietnamese patterns:
+- "tôi có vị trí" / "tôi IP" / "tôi ngồi BTN" / "tôi là BTN" / "tôi BTN" → hero_position = "ip"
+- "tôi không có vị trí" / "tôi OOP" / "tôi ngồi BB" / "tôi là BB" / "tôi BB" / "tôi ở BB" → hero_position = "oop"
+- "đối phương có vị trí" / "villain IP" / "villain có position" → hero_position = "oop"
+- "đối phương không có vị trí" / "villain OOP" → hero_position = "ip"
+- "hắn có vị trí" / "nó IP" → hero_position = "oop"
+- "tôi call" / "tôi check-raise" (defensive action) → likely hero_position = "oop"
+- "tôi bet" / "tôi cbet" (aggressive action) → likely hero_position = "ip"
+
+English patterns:
+- "I'm in position" / "I have position" / "I'm IP" / "I'm BTN" → hero_position = "ip"
+- "I'm out of position" / "I'm OOP" / "I'm BB" / "I'm SB" → hero_position = "oop"
+- "villain has position" / "villain is IP" → hero_position = "oop"
+
+Quick rules:
+- Hero is BTN or CO → "ip"
+- Hero is BB or SB → "oop"
+- If NO position info → default position = "BTN_vs_BB", hero_position = "oop"
+
+STREETS: flop, turn, river
+
+BOARD BUCKETS (18 types — classify the FLOP texture):
+- A_dry: Ace-high, rainbow, disconnected (e.g. As7d2c, Ad9c3h)
+- K_dry: King-high, rainbow, dry (e.g. Ks8d3c, Kd7c2h)
+- Q_dry: Queen-high, rainbow, dry (e.g. Qs7d3c)
+- ace_wet: Ace-high with connected/suited cards (e.g. Ah9h5d, AsTsJd)
+- broadway_wet: All T+ coordinated (e.g. KsQdJc, TsJdQh)
+- connected_high: High connected (e.g. Ts9d8c, JsTd9c)
+- connected_mid: Mid connected (e.g. 8s7d6c, 9d8c7s)
+- connected_low: Low connected (e.g. 5s6d7c, 4c5d6s, 3s4c5d)
+- low_dry: Low rainbow dry, highest card <= 8 (e.g. 8d4c2s, 7s3d2c)
+- mid_wet: Mid cards coordinated/suited (e.g. 8s7s4d, 9d6d3c)
+- monotone_A: All 3 cards same suit + Ace (e.g. As7s2s, Ad5d3d)
+- monotone_low: All 3 cards same suit, no Ace/King (e.g. 8s5s2s, 7d4d3d)
+- paired_high: Board pair, high rank K+ (e.g. KsKd5c, AsAd7c)
+- paired_mid: Board pair, mid rank 7-Q (e.g. 8s8d3c, TsTd4c)
+- paired_low: Board pair, low rank 2-6 (e.g. 3s3d9c, 5s5dKc)
+- two_tone_A: 2 same suit + Ace-high (e.g. As7s2c, Ad5d3c)
+- two_tone_K: 2 same suit + King-high (e.g. Ks8s3c, Kd7d2c)
+- two_tone_low: 2 same suit + low-mid high card (e.g. 8s5s2c, 9d4d3c)
+
+ACTION LINES (for turn/river — what happened on flop):
+- cbet33_call: IP bet 33% pot on flop, OOP called
+- cbet75_call: IP bet 75% pot on flop, OOP called
+- xx: Both players checked flop (check-check, x/x, "check qua")
+For flop: action_line MUST be null
+
+TURN TYPES (how the turn card changes the board):
+- blank: Doesn't change much (e.g. low card on high board)
+- overcard: Higher than all flop cards
+- undercard: Lower than all flop cards
+- board_pair: Pairs one of the flop cards
+- flush_card: Brings a 3rd suited card (flush possible)
+- straight_card: Connects and makes straights more likely
+For flop: turn_type MUST be null
+
+RIVER TYPES (how the river card changes the board):
+- blank: Doesn't change much
+- overcard: Higher than board
+- board_pair: Pairs the board
+- flush_card: Completes possible flush
+For flop/turn: river_type MUST be null
+
+=== OUTPUT FORMAT ===
+
+Return ONLY valid JSON:
+{
+  "position": "BTN_vs_BB",
+  "board_bucket": "A_dry",
+  "street": "flop",
+  "action_line": null,
+  "turn_type": null,
+  "river_type": null,
+  "hero_hand": "AcKd",
+  "hero_position": "oop",
+  "board_cards": "As,7d,2c",
+  "situation_summary": "BB facing cbet 33% trên flop A-dry, cầm top pair top kicker"
+}
+
+=== CRITICAL RULES ===
+
+1. POSITION DEFAULTS: If not specified, use "BTN_vs_BB". "SB" → "SB_vs_BB". "CO" → "CO_vs_BTN".
+2. STREET: 3 board cards = flop, 4 = turn, 5 = river.
+3. FLOP: action_line=null, turn_type=null, river_type=null
+4. TURN: action_line REQUIRED, turn_type REQUIRED, river_type=null
+5. RIVER: action_line + turn_type + river_type ALL REQUIRED
+6. hero_hand: "AcKd" format (rank+suit concatenated). Use "T" for 10.
+7. board_cards: comma-separated, e.g. "As,7d,2c"
+8. BUCKET: Classify based on FLOP (first 3 cards), not full board.
+9. Bet sizes: "cbet nhỏ" / "bet 1/3" / "small bet" → cbet33_call. "Cbet to" / "bet 3/4" / "big bet" → cbet75_call.
+10. "check qua" / "x/x" / "không ai bet" / "check-check" → xx.
+11. situation_summary: follow LANGUAGE VALIDATION rules above. Be specific about hand class + action.
+12. If hero_hand not mentioned → null.
+13. Return ONLY valid JSON. No markdown, no code fences, no text outside the JSON.`;
+}

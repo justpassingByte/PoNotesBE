@@ -1,6 +1,16 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { asyncErrorWrapper } from '../utils/asyncErrorWrapper';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
+import { backupController } from '../controllers/backupController';
+
+const uploadDir = path.join(__dirname, '../../uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+const upload = multer({ dest: uploadDir });
 
 const router = Router();
 
@@ -295,6 +305,18 @@ router.post('/promote-me', asyncErrorWrapper(async (req, res) => {
 
     res.json({ success: true, message: 'You are now an administrator.' });
 }));
+
+// GET /api/admin/db/settings - Get current backup email
+router.get('/db/settings', isAdmin, backupController.getSettings);
+
+// POST /api/admin/db/settings - Update backup email
+router.post('/db/settings', isAdmin, backupController.updateSettings);
+
+// POST /api/admin/db/backup - Trigger manual backup
+router.post('/db/backup', isAdmin, backupController.triggerBackup);
+
+// POST /api/admin/db/restore - Upload and restore backup
+router.post('/db/restore', isAdmin, upload.single('backup'), backupController.restoreBackup);
 
 export const adminRoutes = router;
 

@@ -272,7 +272,9 @@ export class PlayerController {
                 include: {
                     notes: true,
                     platform: true,
-                    stats: true
+                    stats: true,
+                    patterns: true,
+                    analysis_contexts: true
                 },
                 orderBy: { created_at: 'desc' }
             });
