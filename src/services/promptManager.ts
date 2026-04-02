@@ -450,6 +450,7 @@ Return ONLY valid JSON:
   "turn_type": null,
   "river_type": null,
   "hero_hand": "AcKd",
+  "hero_hand_class": "top_pair",
   "hero_position": "oop",
   "board_cards": "As,7d,2c",
   "situation_summary": "BB facing cbet 33% trên flop A-dry, cầm top pair top kicker"
@@ -467,8 +468,9 @@ Return ONLY valid JSON:
    - Use "T" for 10. Examples: "Ts9s" -> "Ts9s", "JTo" -> "JcTd".
    - If no suits are provided, assign random valid suits.
    - For pocket pairs like "QQ" or "1010", output a valid pair with distinct suits like "QcQd" or "TcTd".
-7. board_cards: comma-separated, e.g. "As,7d,2c"
-8. BUCKET: Classify based on FLOP (first 3 cards), not full board.
+7. hero_hand_class: Assess hero_hand against the board_cards and classify it into EXACTLY ONE of these: straight_flush, quads, full_house, flush, straight, set, trips, two_pair, overpair, top_pair, second_pair, low_pair, underpair, flush_draw, straight_draw, overcards, ace_high, air. If hero_hand is null, this is also null.
+8. board_cards: comma-separated, e.g. "As,7d,2c"
+9. BUCKET: Classify based on FLOP (first 3 cards), not full board.
 9. Bet sizes: "cbet nhỏ" / "bet 1/3" / "small bet" → cbet33_call. "Cbet to" / "bet 3/4" / "big bet" → cbet75_call.
 10. "check qua" / "x/x" / "không ai bet" / "check-check" → xx.
 11. situation_summary: follow LANGUAGE VALIDATION rules above. Be specific about hand class + action.

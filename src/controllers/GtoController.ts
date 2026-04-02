@@ -156,6 +156,19 @@ export class GtoController {
           }
           if (heroResult) break;
         }
+
+        // Graceful Fallback: The user's hand (e.g. Ts9s on Ks,8s,3c) is missing because the DB 
+        // representative board (e.g. Ts,9d,8c) contains those cards, making the hand "blocked" in the DB tree.
+        if (!heroResult && parsed.hero_hand_class && classSummary[heroPlayer]?.[parsed.hero_hand_class]) {
+           const avg = classSummary[heroPlayer][parsed.hero_hand_class];
+           heroResult = {
+             hand: parsed.hero_hand, // fake the correct exact hand back to UI
+             hand_class: parsed.hero_hand_class,
+             check: avg.avg_check,
+             bet_small: avg.avg_bet_small,
+             bet_big: avg.avg_bet_big
+           };
+        }
       }
 
       // Step 5: Query Future Runouts if Hero Hand exists

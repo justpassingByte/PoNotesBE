@@ -25,6 +25,7 @@ export interface GtoParsedQuery {
     turn_type: string | null;
     river_type: string | null;
     hero_hand: string | null;
+    hero_hand_class: string | null;
     hero_position: 'oop' | 'ip';
     board_cards: string;
     situation_summary: string;
@@ -78,7 +79,7 @@ export class GtoPromptBuilder {
         }
 
         // Normalize nulls (LLM sometimes sends "null" string)
-        for (const key of ['action_line', 'turn_type', 'river_type', 'hero_hand']) {
+        for (const key of ['action_line', 'turn_type', 'river_type', 'hero_hand', 'hero_hand_class']) {
             if (parsed[key] === 'null' || parsed[key] === '') {
                 parsed[key] = null;
             }
