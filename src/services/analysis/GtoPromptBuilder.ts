@@ -72,7 +72,10 @@ export class GtoPromptBuilder {
 
         // Enforce null rules by street
         if (parsed.street === 'flop') {
-            parsed.action_line = null;
+            // Preserve facing_cbet action_lines (e.g. "facing_cbet33", "facing_cbet75")
+            if (!parsed.action_line?.includes('facing_')) {
+                parsed.action_line = null;
+            }
             parsed.turn_type = null;
             parsed.river_type = null;
         } else if (parsed.street === 'turn') {

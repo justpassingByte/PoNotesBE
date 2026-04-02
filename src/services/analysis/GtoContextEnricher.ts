@@ -167,9 +167,56 @@ export class GtoContextEnricher {
         if (facingSpot) {
             const sizeLabel = facingCbetSize === 'small' ? '~33% pot' : '~75% pot';
             contextParts.push('');
-            contextParts.push(`--- OOP vs IP C-Bet (${sizeLabel}) - KEY SCENARIO ---`);
+            contextParts.push(`--- OOP vs IP Flop C-Bet (${sizeLabel}) - KEY SCENARIO ---`);
             contextParts.push(`Fold: ${pct(facingSpot.oop_fold)}%  |  Call: ${pct(facingSpot.oop_call)}%  |  Raise: ${pct(facingSpot.oop_raise)}%`);
-            contextParts.push(`⚠️ This is the exact scenario in this hand. Compare OOP's actual action against these GTO frequencies.`);
+            contextParts.push(`⚠️ Compare OOP's actual flop reaction against these GTO frequencies.`);
+        }
+
+        // --- Turn Context (Experimental) ---
+        const turnActions = parsedHand.actions?.turn || [];
+        if (turnActions.length > 0 && parsedHand.board && parsedHand.board.length >= 4) {
+             const turnPot = parsedHand.pot || 5.5; // Would need exact pot tracking
+             const turnFacing = detectFacingCbet(turnActions, turnPot);
+             
+             // Deduce flop action line base for turn prefix 
+             let baseFlopAction = 'check_check';
+             if (facingCbetSize === 'small') baseFlopAction = 'cbet33_call';
+             else if (facingCbetSize === 'large') baseFlopAction = 'cbet75_call';
+
+             if (turnFacing) {
+                 const turnActionStr = turnFacing === 'small' ? 'facing_cbet33' : 'facing_cbet75';
+                 const fullTurnActionLine = baseFlopAction === 'check_check' ? turnActionStr : `${baseFlopAction}_${turnActionStr}`;
+                 
+                 const turnSpotFacing: any = await prisma.gtoSpot.findFirst({
+                     where: {
+                         position: spotKey,
+                         street: 'turn',
+                         action_line: fullTurnActionLine
+                     }
+                 });
+
+                 if (turnSpotFacing) {
+                     contextParts.push('');
+                     contextParts.push(`--- OOP vs IP Turn C-Bet (${turnFacing === 'small' ? '~33%' : '~75%'}) ---`);
+                     contextParts.push(`Action Path: ${fullTurnActionLine}`);
+                     contextParts.push(`Fold: ${pct(turnSpotFacing.oop_fold)}%  |  Call: ${pct(turnSpotFacing.oop_call)}%  |  Raise: ${pct(turnSpotFacing.oop_raise)}%`);
+                 }
+             } else {
+                  // Turn root spot (OOP first action)
+                  const turnSpotRoot: any = await prisma.gtoSpot.findFirst({
+                     where: {
+                         position: spotKey,
+                         street: 'turn',
+                         action_line: baseFlopAction
+                     }
+                  });
+                  if (turnSpotRoot) {
+                     contextParts.push('');
+                     contextParts.push(`--- OOP Turn Root Strategy ---`);
+                     contextParts.push(`Action Path: ${baseFlopAction}`);
+                     contextParts.push(`Check: ${pct(turnSpotRoot.oop_check)}%  |  Bet: ${pct(turnSpotRoot.oop_bet_small)}%  |  Bet Big: ${pct(turnSpotRoot.oop_bet_big)}%`);
+                  }
+             }
         }
 
         contextParts.push('');
@@ -185,19 +232,18 @@ function pct(val: number | null | undefined): string {
 }
 
 /**
- * Detect if OOP is facing a c-bet on the flop.
- * Returns 'small' | 'large' | null based on flop action sequence.
- *
- * Pattern: OOP checks → IP bets → (OOP to act)
- * We classify bet size relative to pot (33% pot = small, 75% = big).
+ * Detect if OOP is facing a c-bet on a postflop street.
+ * Returns 'small' | 'large' | null based on action sequence.
+ * 
+ * Works for Flop, Turn or River action arrays.
  */
 function detectFacingCbet(
-    flopActions: Array<{ player?: string; action?: string; amount?: number }>,
+    streetActions: Array<{ player?: string; action?: string; amount?: number }>,
     pot: number = 5.5
 ): 'small' | 'large' | null {
-    if (!flopActions || flopActions.length < 2) return null;
+    if (!streetActions || streetActions.length < 2) return null;
 
-    const actions = flopActions.map(a => ({
+    const actions = streetActions.map(a => ({
         player: a.player,
         action: (a.action || '').toLowerCase(),
         amount: a.amount ?? 0,

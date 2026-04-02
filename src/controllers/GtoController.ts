@@ -91,7 +91,7 @@ function spotToJson(spot: any) {
 }
 
 function spotStrategy(spot: any) {
-  const isFacing = spot.action_line?.startsWith('facing_');
+  const isFacing = spot.action_line?.includes('facing_');
   if (isFacing) {
     return {
       oop: { fold: spot.oop_fold, call: spot.oop_call, raise: spot.oop_raise },
@@ -211,7 +211,7 @@ export class GtoController {
         orderBy: [{ player: 'asc' }, { hand_class: 'asc' }, { hand: 'asc' }],
       });
 
-      const isFacing = spot.action_line?.startsWith('facing_');
+      const isFacing = spot.action_line?.includes('facing_');
       const { grouped, classSummary } = buildHandData(hands, isFacing);
 
       // Step 5: Find hero hand
@@ -232,19 +232,29 @@ export class GtoController {
         // representative board (e.g. Ts,9d,8c) contains those cards, making the hand "blocked" in the DB tree.
         if (!heroResult && parsed.hero_hand_class && classSummary[heroPlayer]?.[parsed.hero_hand_class]) {
            const avg = classSummary[heroPlayer][parsed.hero_hand_class];
-           heroResult = {
-             hand: parsed.hero_hand, // fake the correct exact hand back to UI
-             hand_class: parsed.hero_hand_class,
-             check: avg.avg_check,
-             bet_small: avg.avg_bet_small,
-             bet_big: avg.avg_bet_big
-           };
+           if (isFacing) {
+             heroResult = {
+               hand: parsed.hero_hand,
+               hand_class: parsed.hero_hand_class,
+               fold: avg.avg_fold,
+               call: avg.avg_call,
+               raise: avg.avg_raise,
+             };
+           } else {
+             heroResult = {
+               hand: parsed.hero_hand,
+               hand_class: parsed.hero_hand_class,
+               check: avg.avg_check,
+               bet_small: avg.avg_bet_small,
+               bet_big: avg.avg_bet_big,
+             };
+           }
         }
       }
 
       // Step 6: Query Future Runouts (only for non-facing root spots)
       const futureRunouts: any[] = [];
-      const isFacingSpot = spot.action_line?.startsWith('facing_');
+      const isFacingSpot = spot.action_line?.includes('facing_');
       if (heroResult && !isFacingSpot) {
         if (parsed.street === 'turn' && parsed.action_line && parsed.turn_type) {
           const runoutSpots = await (prisma as any).gtoSpot.findMany({
