@@ -354,8 +354,6 @@ export { KEYWORD_MAP };
 /**
  * Build the system prompt for GTO Oracle — natural language poker query parser.
  * Parses Vietnamese or English poker questions into structured JSON for GTO database lookup.
- * 
- * @param language - 'vi' or 'en' to determine situation_summary language
  */
 export function buildGtoOraclePrompt(language?: string): string {
   const languageRule = language === 'vi'
@@ -374,77 +372,33 @@ POSITIONS (3 matchups available):
 - SB_vs_BB (Small Blind vs Big Blind)
 - CO_vs_BTN (Cutoff vs Button)
 
-HERO POSITION PARSING (critical — understand who "tôi"/"I" is):
-
-Vietnamese patterns:
-- "tôi có vị trí" / "tôi IP" / "tôi ngồi BTN" / "tôi là BTN" / "tôi BTN" → hero_position = "ip"
-- "tôi không có vị trí" / "tôi OOP" / "tôi ngồi BB" / "tôi là BB" / "tôi BB" / "tôi ở BB" → hero_position = "oop"
-- "đối phương có vị trí" / "villain IP" / "villain có position" → hero_position = "oop"
-- "đối phương không có vị trí" / "villain OOP" → hero_position = "ip"
-- "hắn có vị trí" / "nó IP" → hero_position = "oop"
-- "tôi call" / "tôi check-raise" (defensive action) → likely hero_position = "oop"
-- "tôi bet" / "tôi cbet" (aggressive action) → likely hero_position = "ip"
-
-English patterns:
-- "I'm in position" / "I have position" / "I'm IP" / "I'm BTN" → hero_position = "ip"
-- "I'm out of position" / "I'm OOP" / "I'm BB" / "I'm SB" → hero_position = "oop"
-- "villain has position" / "villain is IP" → hero_position = "oop"
-
-Quick rules:
-- Hero is BTN or CO → "ip"
-- Hero is BB or SB → "oop"
-- If NO position info → default position = "BTN_vs_BB", hero_position = "oop"
+HERO POSITION PARSING (critical):
+Vietnamese: "tôi IP", "tôi ngồi BTN", "tôi là BTN" -> "ip". "tôi OOP", "tôi ngồi BB", "tôi ở BB" -> "oop".
+Quick rules: Hero is BTN or CO -> "ip". Hero is BB or SB -> "oop".
 
 STREETS: flop, turn, river
 
-BOARD BUCKETS (18 types — classify the FLOP texture):
-- A_dry: Ace-high, rainbow, disconnected (e.g. As7d2c, Ad9c3h)
-- K_dry: King-high, rainbow, dry (e.g. Ks8d3c, Kd7c2h)
-- Q_dry: Queen-high, rainbow, dry (e.g. Qs7d3c)
-- ace_wet: Ace-high with connected/suited cards (e.g. Ah9h5d, AsTsJd)
-- broadway_wet: All T+ coordinated (e.g. KsQdJc, TsJdQh)
-- connected_high: High connected (e.g. Ts9d8c, JsTd9c)
-- connected_mid: Mid connected (e.g. 8s7d6c, 9d8c7s)
-- connected_low: Low connected (e.g. 5s6d7c, 4c5d6s, 3s4c5d)
-- low_dry: Low rainbow dry, highest card <= 8 (e.g. 8d4c2s, 7s3d2c)
-- mid_wet: Mid cards coordinated/suited (e.g. 8s7s4d, 9d6d3c)
-- monotone_A: All 3 cards same suit + Ace (e.g. As7s2s, Ad5d3d)
-- monotone_low: All 3 cards same suit, no Ace/King (e.g. 8s5s2s, 7d4d3d)
-- paired_high: Board pair, high rank K+ (e.g. KsKd5c, AsAd7c)
-- paired_mid: Board pair, mid rank 7-Q (e.g. 8s8d3c, TsTd4c)
-- paired_low: Board pair, low rank 2-6 (e.g. 3s3d9c, 5s5dKc)
-- two_tone_A: 2 same suit + Ace-high (e.g. As7s2c, Ad5d3c)
-- two_tone_K: 2 same suit + King-high (e.g. Ks8s3c, Kd7d2c)
-- two_tone_low: 2 same suit + low-mid high card (e.g. 8s5s2c, 9d4d3c)
+BOARD_CARDS (CRITICAL): EXTRACT ALL 3-5 CARDS.
+- Use EXACT cards if mentioned (e.g. "Ks 8s 3c" -> "Ks,8s,3c").
+- Bilingual Synonyms mapping (English/Vietnamese):
+  - "A dry", "Ace-high dry", "A cao khô", "board rác A" -> "As,7d,2c"
+  - "K dry", "K-high dry", "K cao khô", "K-dry" -> "Ks,8d,3c"
+  - "Q dry", "Q-high dry", "Q cao khô", "Q-dry" -> "Qs,7d,2c"
+  - "Low dry", "Rag board", "Board thấp", "mặt rác" -> "8d,4c,2s"
+  - "Paired board", "Board đôi", "đôi board", "paired" -> "Ks,Kd,2c"
+  - "Two-tone", "Flush draw", "có thùng", "2 bích", "2 cơ" -> Assign 2 cards with same suit (e.g. "Ks,8s,3c")
+  - "Monotone", "3-flush", "3 bích", "đều bích" -> Assign 3 cards with same suit (e.g. "As,7s,2s")
+- Output board_cards as comma-separated values.
 
-ACTION LINES (for turn/river — what happened on flop):
-- cbet33_call: IP bet 33% pot on flop, OOP called
-- cbet75_call: IP bet 75% pot on flop, OOP called
-- xx: Both players checked flop (check-check, x/x, "check qua")
-For flop: action_line MUST be null
+BOARD BUCKET: ALWAYS set this to "auto".
 
-TURN TYPES (how the turn card changes the board):
-- blank: Doesn't change much (e.g. low card on high board)
-- overcard: Higher than all flop cards
-- undercard: Lower than all flop cards
-- board_pair: Pairs one of the flop cards
-- flush_card: Brings a 3rd suited card (flush possible)
-- straight_card: Connects and makes straights more likely
-For flop: turn_type MUST be null
-
-RIVER TYPES (how the river card changes the board):
-- blank: Doesn't change much
-- overcard: Higher than board
-- board_pair: Pairs the board
-- flush_card: Completes possible flush
-For flop/turn: river_type MUST be null
+ACTION LINES (for turn/river): cbet33_call, cbet75_call, xx.
 
 === OUTPUT FORMAT ===
-
 Return ONLY valid JSON:
 {
   "position": "BTN_vs_BB",
-  "board_bucket": "A_dry",
+  "board_bucket": "auto",
   "street": "flop",
   "action_line": null,
   "turn_type": null,
@@ -457,23 +411,13 @@ Return ONLY valid JSON:
 }
 
 === CRITICAL RULES ===
-
-1. POSITION DEFAULTS: If not specified, use "BTN_vs_BB". "SB" → "SB_vs_BB". "CO" → "CO_vs_BTN".
-2. STREET: 3 board cards = flop, 4 = turn, 5 = river.
-3. FLOP: action_line=null, turn_type=null, river_type=null
-4. TURN: action_line REQUIRED, turn_type REQUIRED, river_type=null
-5. RIVER: action_line + turn_type + river_type ALL REQUIRED
-6. hero_hand: MUST use EXACT 4-character valid poker format (e.g., "AcKd").
-   - Suits MUST be EXACTLY one of: c, d, h, s. NEVER output 'o' (offsuit) as a suit (e.g., NO "QoQd").
-   - Use "T" for 10. Examples: "Ts9s" -> "Ts9s", "JTo" -> "JcTd".
-   - If no suits are provided, assign random valid suits.
-   - For pocket pairs like "QQ" or "1010", output a valid pair with distinct suits like "QcQd" or "TcTd".
-7. hero_hand_class: Assess hero_hand against the board_cards and classify it into EXACTLY ONE of these: straight_flush, quads, full_house, flush, straight, set, trips, two_pair, overpair, top_pair, second_pair, low_pair, underpair, flush_draw, straight_draw, overcards, ace_high, air. If hero_hand is null, this is also null.
-8. board_cards: comma-separated, e.g. "As,7d,2c"
-9. BUCKET: Classify based on FLOP (first 3 cards), not full board.
-9. Bet sizes: "cbet nhỏ" / "bet 1/3" / "small bet" → cbet33_call. "Cbet to" / "bet 3/4" / "big bet" → cbet75_call.
-10. "check qua" / "x/x" / "không ai bet" / "check-check" → xx.
-11. situation_summary: follow LANGUAGE VALIDATION rules above. Be specific about hand class + action.
-12. If hero_hand not mentioned → null.
-13. Return ONLY valid JSON. No markdown, no code fences, no text outside the JSON.`;
+1. POSITION DEFAULTS: If not specified, use "BTN_vs_BB".
+2. STREET: 3 community cards = flop, 4 = turn, 5 = river.
+3. FLOP: action_line=null, turn_type=null, river_type=null.
+4. hero_hand: MUST use EXACT 4-character valid poker format (e.g., "AcKd"). 
+   - Suits MUST be EXACTLY one of: c, d, h, s. NEVER output 'o' (offsuit). 
+   - Use "T" for 10. "Ts9s", "TcTd".
+5. hero_hand_class: Classify into ONE: straight_flush, quads, full_house, flush, straight, set, trips, two_pair, overpair, top_pair, second_pair, low_pair, underpair, flush_draw, straight_draw, overcards, ace_high, air.
+6. situation_summary: Follow language validation. Do NOT translate poker actions.
+7. Return ONLY valid JSON. No markdown, no fences.`;
 }

@@ -8,6 +8,7 @@
 import { buildGtoOraclePrompt } from '../promptManager';
 
 const BOARD_BUCKETS = [
+    "auto",
     "A_dry", "K_dry", "Q_dry", "ace_wet", "broadway_wet",
     "connected_high", "connected_mid", "connected_low",
     "low_dry", "mid_wet", "monotone_A", "monotone_low",

@@ -1,6 +1,30 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { GtoPromptBuilder } from '../services/analysis/GtoPromptBuilder';
+import { BoardBucketParser } from '../services/analysis/context/BoardBucketParser';
+import { HandTransposer } from '../services/analysis/context/HandTransposer';
+
+// Representative boards for each of the 18 GTO buckets
+const GTO_REP_BOARDS: Record<string, string[]> = {
+    "A_dry": ["As", "7d", "2c"],
+    "K_dry": ["Ks", "8d", "3c"],
+    "Q_dry": ["Qs", "7d", "2c"],
+    "ace_wet": ["As", "9s", "8c"],
+    "broadway_wet": ["Ks", "Qs", "Jc"],
+    "connected_high": ["Ks", "Qd", "Jc"],
+    "connected_mid": ["Ts", "9d", "8c"],
+    "connected_low": ["7s", "6d", "5c"],
+    "low_dry": ["8s", "4d", "2c"],
+    "mid_wet": ["Js", "9s", "7c"],
+    "monotone_A": ["As", "7s", "2s"],
+    "monotone_low": ["Ts", "7s", "2s"],
+    "paired_high": ["Ks", "Kd", "2c"],
+    "paired_mid": ["9s", "9d", "3c"],
+    "paired_low": ["5s", "5d", "2c"],
+    "two_tone_A": ["As", "7s", "2c"],
+    "two_tone_K": ["Ks", "8s", "3c"],
+    "two_tone_low": ["8s", "4s", "2c"]
+};
 
 // ─── Helper: group hands and compute class summaries ────────────
 function buildHandData(hands: any[]) {
@@ -113,11 +137,27 @@ export class GtoController {
       }
       console.log('------------------------------------\n');
 
-      // Step 2: Query DB
+      // Step 2: Deterministic bucket mapping and hand transposition
+      let boardBucket = parsed.board_bucket;
+      let queryHand = parsed.hero_hand;
+
+      if (parsed.board_cards && (parsed.board_bucket === 'auto' || !parsed.board_bucket)) {
+          const cards = parsed.board_cards.split(',').map(c => c.trim());
+          boardBucket = BoardBucketParser.getGtoBucketName(cards);
+          
+          const repBoard = GTO_REP_BOARDS[boardBucket];
+          if (repBoard && parsed.hero_hand) {
+              const suitMap = HandTransposer.createSuitMap(cards, repBoard);
+              queryHand = HandTransposer.transposeHand(parsed.hero_hand, suitMap);
+              console.log(`[GTO ORACLE] Transposed Hand: ${parsed.hero_hand} -> ${queryHand} for bucket ${boardBucket}`);
+          }
+      }
+
+      // Step 3: Query DB
       const spot = await (prisma as any).gtoSpot.findFirst({
         where: {
           position: parsed.position,
-          board_bucket: parsed.board_bucket,
+          board_bucket: boardBucket,
           street: parsed.street,
           action_line: parsed.action_line || null,
           turn_type: parsed.turn_type || null,
@@ -129,13 +169,13 @@ export class GtoController {
         return res.status(404).json({
           error: 'Spot not found in GTO database',
           parsed,
-          hint: `No data for ${parsed.position} / ${parsed.board_bucket} / ${parsed.street}` +
+          hint: `No data for ${parsed.position} / ${boardBucket} / ${parsed.street}` +
                 (parsed.action_line ? ` / ${parsed.action_line}` : '') +
                 (parsed.turn_type ? ` / ${parsed.turn_type}` : ''),
         });
       }
 
-      // Step 3: Get hands
+      // Step 4: Get hands
       const hands = await (prisma as any).gtoHand.findMany({
         where: { spot_id: spot.id },
         orderBy: [{ player: 'asc' }, { hand_class: 'asc' }, { hand: 'asc' }],
@@ -143,14 +183,14 @@ export class GtoController {
 
       const { grouped, classSummary } = buildHandData(hands);
 
-      // Step 4: Find hero hand
+      // Step 5: Find hero hand
       let heroResult: any = null;
-      if (parsed.hero_hand) {
+      if (queryHand) {
         const heroPlayer = parsed.hero_position || 'oop';
         for (const [cls, handList] of Object.entries(grouped[heroPlayer] || {})) {
           for (const h of (handList as any[])) {
-            if (h.hand === parsed.hero_hand) {
-              heroResult = { ...h, hand_class: cls };
+            if (h.hand === queryHand) {
+              heroResult = { ...h, hand: parsed.hero_hand, hand_class: cls }; // Map back to user's original hand name for UI
               break;
             }
           }
@@ -178,7 +218,7 @@ export class GtoController {
           const runoutSpots = await (prisma as any).gtoSpot.findMany({
             where: {
               position: parsed.position,
-              board_bucket: parsed.board_bucket,
+              board_bucket: boardBucket,
               street: 'river',
               action_line: parsed.action_line,
               turn_type: parsed.turn_type,
@@ -186,13 +226,14 @@ export class GtoController {
           });
           for (const rs of runoutSpots) {
              const futureHand = await (prisma as any).gtoHand.findFirst({
-                where: { spot_id: rs.id, player: parsed.hero_position, hand: parsed.hero_hand }
+                where: { spot_id: rs.id, player: parsed.hero_position, hand: queryHand }
              });
              if (futureHand) {
                  futureRunouts.push({
                     runout_type: rs.river_type,
                     board: rs.board,
-                    ...futureHand
+                    ...futureHand,
+                    hand: parsed.hero_hand // Map back to original hand for UI
                  });
              }
           }
@@ -203,19 +244,19 @@ export class GtoController {
           } else if (spot.ip_bet_small > spot.ip_check) {
             bestActionLine = 'cbet33_call';
           }
-
-          const runoutSpots = await (prisma as any).gtoSpot.findMany({
-            where: {
-              position: parsed.position,
-              board_bucket: parsed.board_bucket,
-              street: 'turn',
-              action_line: bestActionLine,
-            }
-          });
-          for (const rs of runoutSpots) {
-             const futureHand = await (prisma as any).gtoHand.findFirst({
-                where: { spot_id: rs.id, player: parsed.hero_position, hand: parsed.hero_hand }
-             });
+ 
+           const runoutSpots = await (prisma as any).gtoSpot.findMany({
+             where: {
+               position: parsed.position,
+               board_bucket: boardBucket,
+               street: 'turn',
+               action_line: bestActionLine,
+             }
+           });
+           for (const rs of runoutSpots) {
+              const futureHand = await (prisma as any).gtoHand.findFirst({
+                 where: { spot_id: rs.id, player: parsed.hero_position, hand: queryHand }
+              });
              if (futureHand) {
                  futureRunouts.push({
                     action_line: bestActionLine,

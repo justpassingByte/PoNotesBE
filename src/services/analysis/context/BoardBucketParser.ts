@@ -173,4 +173,58 @@ export class BoardBucketParser {
 
         return "DISCONNECTED"; // span > 4 e.g. 2,6,A (14-2=12)
     }
+
+    /**
+     * Map the generic structural features to one of the 18 specific GTO buckets used in the DB.
+     */
+    public static getGtoBucketName(cards: string[]): string {
+        const bucket = this.categorize(cards);
+        const { highCardTier, pairedStatus, suitedness, connectivity } = bucket;
+
+        // 1. Monotone Boards
+        if (suitedness === "MONOTONE") {
+            return (highCardTier === "ACE_HIGH") ? "monotone_A" : "monotone_low";
+        }
+
+        // 2. Paired Boards
+        if (pairedStatus === "PAIRED" || pairedStatus === "TRIPS" || pairedStatus === "QUADS") {
+            if (highCardTier === "ACE_HIGH" || highCardTier === "KING_HIGH") return "paired_high";
+            if (highCardTier === "QUEEN_HIGH" || highCardTier === "JACK_HIGH") return "paired_mid";
+            return "paired_low";
+        }
+
+        // 3. Two-Tone Boards (excluding Paired)
+        if (suitedness === "TWO_TONE") {
+            if (highCardTier === "ACE_HIGH") return "two_tone_A";
+            if (highCardTier === "KING_HIGH") return "two_tone_K";
+            return "two_tone_low";
+        }
+
+        // 4. Ace/King/Queen High Dry Boards
+        if (connectivity === "DISCONNECTED") {
+            if (highCardTier === "ACE_HIGH") return "A_dry";
+            if (highCardTier === "KING_HIGH") return "K_dry";
+            if (highCardTier === "QUEEN_HIGH") return "Q_dry";
+        }
+
+        // 5. Broadway / Wet Boards
+        if (highCardTier === "JACK_HIGH" || connectivity === "VERY_CONNECTED") {
+            return "broadway_wet";
+        }
+        
+        if (highCardTier === "ACE_HIGH" && connectivity !== "DISCONNECTED") {
+            return "ace_wet";
+        }
+
+        // 6. Connected Boards (Mid/Low)
+        if (connectivity === "CONNECTED" || connectivity === "SEMI_CONNECTED") {
+            const values = cards.map(c => this.RANK_MAP[c[0].toUpperCase()]);
+            const maxVal = Math.max(...values);
+            if (maxVal >= 10) return "connected_high";
+            if (maxVal >= 7) return "connected_mid";
+            return "connected_low";
+        }
+
+        return "low_dry";
+    }
 }
