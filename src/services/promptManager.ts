@@ -400,7 +400,7 @@ Return ONLY valid JSON:
   "position": "BTN_vs_BB",
   "board_bucket": "auto",
   "street": "flop",
-  "action_line": null,
+  "action_line": "cbet33",
   "turn_type": null,
   "river_type": null,
   "hero_hand": "AcKd",

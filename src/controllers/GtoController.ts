@@ -148,6 +148,7 @@ export class GtoController {
           
           const repBoard = GTO_REP_BOARDS[boardBucket];
           if (repBoard) {
+              parsed.board_bucket = boardBucket; // Update the parsed object to display in GUI
               repBoardStr = repBoard.join(',');
               if (parsed.hero_hand) {
                   const suitMap = HandTransposer.createSuitMap(cards, repBoard);
