@@ -16,8 +16,7 @@ RUN npm run build
 FROM node:20-alpine
 
 # Install postgresql-client for pg_dump and psql
-RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/* || \
-    (apk add --no-cache postgresql15-client)
+RUN apk add --no-cache postgresql-client
 
 WORKDIR /app
 
