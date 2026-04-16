@@ -15,6 +15,10 @@ RUN npm run build
 # Production Stage
 FROM node:20-alpine
 
+# Install postgresql-client for pg_dump and psql
+RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/* || \
+    (apk add --no-cache postgresql15-client)
+
 WORKDIR /app
 
 COPY --from=builder /app/package*.json ./
