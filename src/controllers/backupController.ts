@@ -73,7 +73,7 @@ async function sendBackupEmail(filepath: string, toEmail: string) {
     const filename = path.basename(filepath);
     
     await transporter.sendMail({
-        from: `"VillainVault Backup" <${process.env.SMTP_USER || 'noreply@villainvault.com'}>`,
+        from: process.env.EMAIL_FROM || `"VillainVault Backup" <${process.env.SMTP_USER || 'noreply@villainvault.com'}>`,
         to: toEmail,
         subject: `[VillainVault] Automated Database Backup - ${new Date().toLocaleDateString()}`,
         text: 'Attached is the latest automated database backup for VillainVault.',
